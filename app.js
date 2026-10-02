@@ -536,7 +536,12 @@
       var act = b.dataset.act, key = b.dataset.key;
       if (act === 'open') { S.openEvent = S.openEvent === key ? null : key; renderEvents(); return; }
       if (!S.me.isAdmin || S.evBusy) return;
-      if (act === 'assign' || act === 'unassign') {
+      if (act === 'assign-pick') {
+        // 「全員から選ぶ」：空き状況・役割の希望に関係なく、だれでも担当にできる（電話で頼んだ人など）
+        var sel = b.closest('.pick').querySelector('select');
+        if (!sel.value) { S.evMsg = { kind: 'ng', text: '担当にする人を選んでください' }; renderEvents(); return; }
+        adminOp('assign', { eventKey: key, staffId: sel.value, role: b.dataset.role, on: true });
+      } else if (act === 'assign' || act === 'unassign') {
         adminOp('assign', { eventKey: key, staffId: b.dataset.staff, role: b.dataset.role, on: act === 'assign' });
       } else if (act === 'relink') {
         // 日時が変わった予定へ付け直す：新しい予定に付けてから、古い割り当てを外す
@@ -659,7 +664,8 @@
       '<div class="badges">' + badges + '</div>' +
       '<div class="ev-assigned">担当：' + assigned + '</div>';
     if (S.me.isAdmin) {
-      h += '<button type="button" class="ev-open" data-act="open" data-key="' + ev.key + '">' + (open ? '閉じる ▴' : '空いている人・担当を決める ▾') + '</button>';
+      h += '<button type="button" class="ev-open' + (open ? ' is-open' : '') + '" data-act="open" data-key="' + ev.key + '">' +
+        (open ? '閉じる ▴' : '<span class="ev-open-icon" aria-hidden="true">＋</span>担当を決める<small>空いている人を見る</small><span class="ev-open-arrow" aria-hidden="true">▾</span>') + '</button>';
       if (open) h += renderEventDetail(ev);
     }
     return h + '</article>';
@@ -695,6 +701,7 @@
           return esc(x.st.name) + '<small>（' + (x.pref ? esc(x.pref) : '役割未登録') + (x.ok ? '' : '・会場外') + '）</small>';
         }).join('、') + '</p>';
       }
+      h += pickRow(ev, role, mine);
       h += '</section>';
     });
     var busy = S.staff.filter(function (st) { return !availOn(st.staffId, ev.dates).free; }).map(function (st) {
@@ -711,6 +718,22 @@
       '<option value="' + VENUE_NONE + '"' + (ev.venueFixed && !ev.venue ? ' selected' : '') + '>会場で絞らない</option></select></label>' +
       '<button type="button" class="mini" data-act="meta" data-key="' + ev.key + '"' + (S.evBusy ? ' disabled' : '') + '>直す</button></div>';
     return h + '</div>';
+  }
+
+  /** 全員から選ぶ：候補にいない人（希望しない・未回答・×・会場外）も担当にできる */
+  function pickRow(ev, role, mine) {
+    var opts = S.staff.filter(function (st) { return !mine.some(function (a) { return a.staffId === st.staffId; }); }).map(function (st) {
+      var c = availOn(st.staffId, ev.dates);
+      var r = S.roles[st.staffId];
+      var notes = [c.label];
+      if (r && r[role]) notes.push(r[role] === '積極的にやりたい' ? '積極的' : r[role]);
+      if (!venueOk(st.staffId, ev)) notes.push('会場外');
+      return '<option value="' + esc(st.staffId) + '">' + esc(st.name) + '（' + esc(notes.join('・')) + '）</option>';
+    });
+    if (!opts.length) return '';
+    return '<div class="pick"><label>全員から選ぶ <select aria-label="' + ROLE_LABEL[role] + 'の担当を全員から選ぶ"><option value="">選んでください</option>' + opts.join('') + '</select></label>' +
+      '<button type="button" class="mini" data-act="assign-pick" data-key="' + ev.key + '" data-role="' + role + '"' + (S.evBusy ? ' disabled' : '') + '>担当にする</button>' +
+      '<small class="pick-hint">電話で頼んだ人など、アプリ未入力の人もここから選べます</small></div>';
   }
 
   function candRow(ev, role, x) {

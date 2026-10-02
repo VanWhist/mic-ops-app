@@ -166,7 +166,20 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .badge.calsrc { color: var(--muted); }
 .ev-assigned { font-size: 14px; }
 .warn { color: var(--ng); font-size: 12px; font-weight: 700; }
-.ev-open { margin-top: 8px; width: 100%; border: 1px solid var(--line); background: #f8f9fb; border-radius: 8px; padding: 8px; font-size: 14px; }
+.ev-open {
+  margin-top: 10px; width: 100%; min-height: 48px; border: 2px solid var(--accent); background: #eef3fd; color: var(--accent);
+  border-radius: 10px; padding: 8px 12px; font-size: 15px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.ev-open small { font-size: 12px; font-weight: 400; }
+.ev-open-icon { display: inline-flex; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; align-items: center; justify-content: center; font-size: 15px; }
+.ev-open-arrow { margin-left: auto; }
+.ev-open.is-open { background: #fff; border-width: 1px; font-weight: 400; color: var(--muted); border-color: var(--line); min-height: 40px; }
+.ev-open:active { transform: translateY(1px); }
+.pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding: 8px; background: #f8f9fb; border: 1px dashed var(--line); border-radius: 8px; font-size: 14px; }
+.pick label { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.pick select { font-size: 16px; padding: 4px; flex: 1; min-width: 0; max-width: 100%; }
+.pick-hint { flex-basis: 100%; color: var(--muted); font-size: 12px; }
 .ev-detail { margin-top: 10px; }
 .role-sec { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; }
 .role-sec h4, .ev-meta h4 { margin: 0 0 6px; font-size: 14px; }
