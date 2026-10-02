@@ -35,7 +35,8 @@
     me: null, staff: [], roles: {}, avail: {}, period: null,
     tab: 'mine', month: null, pen: '○', range: false, rangeStart: null,
     pending: {}, failed: {}, inflight: false, timer: null, error: null, lastSaved: null,
-    noteDates: [], weekendOnly: true, selectedDay: null
+    noteDates: [], weekendOnly: true, selectedDay: null,
+    events: {}, openEvent: null, evBusy: false, evMsg: null
   };
 
   // ================================================================ 通信
@@ -176,14 +177,16 @@
       var t = todayJst().slice(0, 7);
       var months = monthsOf(S.period);
       S.month = months.indexOf(t) >= 0 ? t : months[0];
-      S.tab = S.me.isAdmin ? 'all' : 'mine';
+      S.tab = S.me.isAdmin ? 'events' : 'mine';
       hide('loading');
       byId('who').textContent = S.me.isAdmin ? '管理者' : S.me.name + 'さん';
       setupTabs();
       setupMine();
       setupAll();
       setupRoles();
+      setupEvents();
       renderAll();
+      if (S.tab === 'events') loadEvents(S.month);
     }).catch(function (e) {
       fatal(e.code === 'auth' ? 'このURLは使えません。管理者に新しいURLをもらってください。' : '読み込めませんでした：' + e.message + '（時間をおいて開き直してください）');
     });
@@ -208,7 +211,7 @@
     nav.hidden = false;
     nav.querySelectorAll('.tab').forEach(function (b) {
       if (S.me.isAdmin && b.dataset.tab === 'mine') b.hidden = true;
-      b.addEventListener('click', function () { S.tab = b.dataset.tab; renderAll(); });
+      b.addEventListener('click', function () { S.tab = b.dataset.tab; renderAll(); if (S.tab === 'events') loadEvents(S.month); });
     });
     document.querySelectorAll('.month-nav').forEach(function (nav) {
       nav.querySelector('.prev').addEventListener('click', function () { moveMonth(-1); });
@@ -222,7 +225,9 @@
     if (i < 0 || i >= months.length) return;
     S.month = months[i];
     S.selectedDay = null;
+    S.openEvent = null;
     renderAll();
+    if (S.tab === 'events') loadEvents(S.month);
   }
 
   // ================================================================ 自分の予定
@@ -508,6 +513,217 @@
     byId('rolesTable').innerHTML = h + '</tbody>';
   }
 
+  // ================================================================ 予定と担当（③）
+
+  var ROLE_LABEL = { coaching: 'MICコーチング', lesson: '一般レッスン', escort: '大会引率' };
+  var ROLE_SHORT = { coaching: 'コーチ', lesson: 'レッスン', escort: '引率' };
+  var ROLE_TOP = { coaching: ['積極的にやりたい', '可能'], lesson: ['積極的にやりたい', '可能'], escort: ['可能', '条件付き'] };
+  var EVENT_TYPES = ['練習', '合宿', '大会', '一般レッスン', '未分類'];
+  var VENUE_NONE = 'なし';
+
+  function setupEvents() {
+    byId('evReload').addEventListener('click', function () {
+      // 空き状況・役割も読み直す（担当の人が×に変えたかの警告は、これを元に出している）
+      api('bootstrap').then(function (r) {
+        S.staff = r.staff; S.roles = r.roles || {}; S.avail = r.availability || {}; S.venues = r.venues || S.venues;
+        renderAll();
+      }, function () { /* 予定の読み込み側で失敗を表示する */ });
+      loadEvents(S.month, true);
+    });
+    byId('tab-events').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-act]');
+      if (!b || b.disabled) return;
+      var act = b.dataset.act, key = b.dataset.key;
+      if (act === 'open') { S.openEvent = S.openEvent === key ? null : key; renderEvents(); return; }
+      if (!S.me.isAdmin || S.evBusy) return;
+      if (act === 'assign' || act === 'unassign') {
+        adminOp('assign', { eventKey: key, staffId: b.dataset.staff, role: b.dataset.role, on: act === 'assign' });
+      } else if (act === 'relink') {
+        // 日時が変わった予定へ付け直す：新しい予定に付けてから、古い割り当てを外す
+        adminOp('assign', { eventKey: b.dataset.to, staffId: b.dataset.staff, role: b.dataset.role, on: true }, function () {
+          return { action: 'assign', payload: { eventKey: key, staffId: b.dataset.staff, role: b.dataset.role, on: false } };
+        });
+      } else if (act === 'meta') {
+        var box = b.closest('.ev-meta');
+        adminOp('setEventMeta', { eventKey: key, type: box.querySelector('select[name="type"]').value, venue: box.querySelector('select[name="venue"]').value });
+      }
+    });
+  }
+
+  function loadEvents(month, force) {
+    var cur = S.events[month];
+    if (cur && (cur.status === 'loading' || (cur.status === 'ok' && !force))) return;
+    S.evMsg = null;
+    S.events[month] = { status: 'loading', data: cur && cur.data };
+    renderEvents();
+    api('events', { month: month }).then(function (r) {
+      S.events[month] = { status: 'ok', data: r };
+    }, function (e) {
+      var msg = e.code === 'bad_request' && /不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です。更新後に「最新にする」を押してください' : e.message;
+      S.events[month] = { status: 'error', error: msg, data: cur && cur.data };
+    }).then(renderEvents);
+  }
+
+  /** 管理者の操作。成功したらサーバーが返した月の予定で描き直す。then は続けて行う操作 */
+  function adminOp(action, payload, then) {
+    var month = S.month;
+    S.evBusy = true;
+    S.evMsg = { kind: 'busy', text: '保存中…' };
+    renderEvents();
+    api(action, Object.assign({ month: month }, payload)).then(function (r) {
+      S.events[month] = { status: 'ok', data: r };
+      var next = then && then();
+      if (next) return api(next.action, Object.assign({ month: month }, next.payload)).then(function (r2) { S.events[month] = { status: 'ok', data: r2 }; });
+    }).then(function () {
+      S.evMsg = { kind: 'ok', text: '✓ 保存しました' };
+    }, function (e) {
+      S.evMsg = { kind: 'ng', text: '⚠ 保存できませんでした：' + e.message };
+    }).then(function () { S.evBusy = false; renderEvents(); });
+  }
+
+  /** その予定の日付すべてでの、スタッフの空き具合 */
+  function availOn(staffId, dates) {
+    var c = { o: 0, t: 0, x: 0, n: 0, notes: [] };
+    dates.forEach(function (d) {
+      var v = valueOf(staffId, d);
+      if (v.s === '○') c.o++; else if (v.s === '△') { c.t++; if (v.n) c.notes.push(md(d) + ' ' + v.n); } else if (v.s === '×') c.x++; else c.n++;
+    });
+    var len = dates.length;
+    c.free = c.o + c.t > 0;
+    c.full = c.o === len;
+    if (len === 1) c.label = c.o ? '○' : c.t ? '△' : c.x ? '×' : '未回答';
+    else c.label = c.full ? '全日○' : '○' + c.o + (c.t ? '・△' + c.t : '') + '／' + len + '日';
+    return c;
+  }
+
+  function venueOk(staffId, ev) {
+    if (!ev.venue) return true;
+    var r = S.roles[staffId];
+    return !!(r && r.venues && r.venues.indexOf(ev.venue) >= 0);
+  }
+
+  function nameOf(id) {
+    var st = S.staff.filter(function (x) { return x.staffId === id; })[0];
+    return st ? st.name : id;
+  }
+
+  function evDateLabel(ev) {
+    var d = ev.dates, f = d[0], l = d[d.length - 1];
+    var s = md(f) + '（' + WD[weekday(f)] + '）';
+    if (d.length > 1) return s + '〜' + md(l) + '（' + WD[weekday(l)] + '）' + d.length + '日間';
+    return ev.allDay ? s + ' 終日' : s + ' ' + ev.start.slice(11) + '–' + ev.end.slice(11);
+  }
+
+  function renderEvents() {
+    if (!S.me) return;
+    var st = S.events[S.month];
+    var status = byId('evStatus');
+    if (S.evMsg) { status.textContent = S.evMsg.text; status.className = 'ev-status ' + S.evMsg.kind; }
+    else if (st && st.status === 'loading') { status.textContent = '読み込み中…'; status.className = 'ev-status busy'; }
+    else if (st && st.status === 'error') { status.textContent = '⚠ 読み込めませんでした：' + st.error; status.className = 'ev-status ng'; }
+    else { status.textContent = ''; status.className = 'ev-status'; }
+    var data = st && st.data;
+    if (!data || data.month !== S.month) { byId('evList').innerHTML = ''; byId('evOrphans').innerHTML = ''; return; }
+
+    // 要確認：割り当て済みなのに予定が見つからない（削除・日時変更）
+    var oh = '';
+    if (data.orphans.length) {
+      oh = '<div class="orphans"><h3>⚠ 要確認：カレンダーで予定が消えたか、日時が変わりました</h3><ul>' + data.orphans.map(function (o) {
+        var btns = S.me.isAdmin ? (o.moved ? '<button type="button" class="mini" data-act="relink" data-key="' + o.key + '" data-to="' + o.moved.key + '" data-staff="' + esc(o.staffId) + '" data-role="' + esc(o.role) + '">新しい日時に付け直す</button>' : '') +
+          '<button type="button" class="mini ghost" data-act="unassign" data-key="' + o.key + '" data-staff="' + esc(o.staffId) + '" data-role="' + esc(o.role) + '">外す</button>' : '';
+        return '<li><b>' + esc(o.title) + '</b>（元の日時 ' + esc(o.start) + '）— ' + esc(nameOf(o.staffId)) + '（' + (ROLE_SHORT[o.role] || esc(o.role)) + '）' +
+          (o.moved ? '<br><span class="moved">→ 新しい日時 ' + esc(o.moved.start) + '</span>' : '<br><span class="moved">→ 見つかりません（削除された可能性）</span>') + ' ' + btns + '</li>';
+      }).join('') + '</ul></div>';
+    }
+    byId('evOrphans').innerHTML = oh;
+
+    if (!data.events.length) { byId('evList').innerHTML = '<p class="muted">この月の予定はありません。</p>'; return; }
+    byId('evList').innerHTML = data.events.map(renderEventCard).join('');
+  }
+
+  function renderEventCard(ev) {
+    var open = S.openEvent === ev.key;
+    var badges = '<span class="badge type">' + esc(ev.type) + (ev.typeFixed ? '✎' : '') + '</span>' +
+      (ev.venue ? '<span class="badge venue">' + esc(ev.venue) + (ev.venueFixed ? '✎' : '') + '</span>' : '<span class="badge novenue">会場：' + (ev.venueFixed ? '絞らない✎' : '推定なし') + '</span>') +
+      (ev.tentative ? '<span class="badge tent">仮</span>' : '') +
+      (ev.cal === 'レッスン' ? '<span class="badge calsrc">MICレッスン</span>' : '');
+    var assigned = ev.assigned.length ? ev.assigned.map(function (a) {
+      var c = availOn(a.staffId, ev.dates);
+      var warn = c.x ? ' <span class="warn">⚠×の日あり</span>' : (c.n ? ' <span class="warn">⚠未回答の日あり</span>' : '');
+      return '<b>' + esc(nameOf(a.staffId)) + '</b>（' + (ROLE_SHORT[a.role] || esc(a.role)) + '）' + warn;
+    }).join('、') : '<span class="muted">未定</span>';
+    var h = '<article class="ev' + (open ? ' open' : '') + '" data-key="' + ev.key + '">' +
+      '<div class="ev-date">' + evDateLabel(ev) + '</div>' +
+      '<h3 class="ev-title">' + esc(ev.title) + '</h3>' +
+      (ev.location ? '<div class="ev-loc">' + esc(ev.location) + '</div>' : '') +
+      '<div class="badges">' + badges + '</div>' +
+      '<div class="ev-assigned">担当：' + assigned + '</div>';
+    if (S.me.isAdmin) {
+      h += '<button type="button" class="ev-open" data-act="open" data-key="' + ev.key + '">' + (open ? '閉じる ▴' : '空いている人・担当を決める ▾') + '</button>';
+      if (open) h += renderEventDetail(ev);
+    }
+    return h + '</article>';
+  }
+
+  function renderEventDetail(ev) {
+    var h = '<div class="ev-detail">';
+    ev.roles.forEach(function (role) {
+      h += '<section class="role-sec"><h4>' + ROLE_LABEL[role] + '</h4>';
+      var mine = ev.assigned.filter(function (a) { return a.role === role; });
+      if (mine.length) {
+        h += '<ul class="cand assigned">' + mine.map(function (a) {
+          var c = availOn(a.staffId, ev.dates);
+          return '<li><span class="nm">' + esc(nameOf(a.staffId)) + '</span><span class="av">' + c.label + '</span>' +
+            (c.x ? '<span class="warn">⚠×の日あり</span>' : c.n ? '<span class="warn">⚠未回答の日あり</span>' : '') +
+            '<button type="button" class="mini ghost" data-act="unassign" data-key="' + ev.key + '" data-staff="' + a.staffId + '" data-role="' + role + '"' + (S.evBusy ? ' disabled' : '') + '>外す</button></li>';
+        }).join('') + '</ul>';
+      }
+      var top = ROLE_TOP[role];
+      var rows = S.staff.map(function (st, i) {
+        var r = S.roles[st.staffId] || null;
+        return { st: st, i: i, c: availOn(st.staffId, ev.dates), pref: r ? r[role] : '', ok: venueOk(st.staffId, ev), hasRoles: !!r };
+      }).filter(function (x) { return x.c.free && !mine.some(function (a) { return a.staffId === x.st.staffId; }); });
+      var main = rows.filter(function (x) { return top.indexOf(x.pref) >= 0; });
+      var rest = rows.filter(function (x) { return top.indexOf(x.pref) < 0; });
+      main.sort(function (a, b) {
+        return (b.ok - a.ok) || (top.indexOf(a.pref) - top.indexOf(b.pref)) || (b.c.full - a.c.full) || (a.i - b.i);
+      });
+      if (!main.length) h += '<p class="muted">空いていて、この役割を希望・可能としている人はいません。</p>';
+      else h += '<ul class="cand">' + main.map(function (x) { return candRow(ev, role, x); }).join('') + '</ul>';
+      if (rest.length) {
+        h += '<p class="rest">ほかに空いている人：' + rest.map(function (x) {
+          return esc(x.st.name) + '<small>（' + (x.pref ? esc(x.pref) : '役割未登録') + (x.ok ? '' : '・会場外') + '）</small>';
+        }).join('、') + '</p>';
+      }
+      h += '</section>';
+    });
+    var busy = S.staff.filter(function (st) { return !availOn(st.staffId, ev.dates).free; }).map(function (st) {
+      return esc(st.name) + '<small>（' + availOn(st.staffId, ev.dates).label + '）</small>';
+    });
+    if (busy.length) h += '<p class="rest">行けない・未回答：' + busy.join('、') + '</p>';
+
+    // 種類・会場の手直し（アプリ側だけに保存。カレンダーには書かない）
+    h += '<div class="ev-meta"><h4>種類・会場を直す</h4>' +
+      '<label>種類 <select name="type"><option value="">自動（' + esc(ev.typeAuto) + '）</option>' +
+      EVENT_TYPES.map(function (t) { return '<option' + (ev.typeFixed && ev.type === t ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></label>' +
+      '<label>会場 <select name="venue"><option value="">自動（' + esc(ev.venueAuto || '推定なし') + '）</option>' +
+      S.venues.map(function (v) { return '<option' + (ev.venueFixed && ev.venue === v ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join('') +
+      '<option value="' + VENUE_NONE + '"' + (ev.venueFixed && !ev.venue ? ' selected' : '') + '>会場で絞らない</option></select></label>' +
+      '<button type="button" class="mini" data-act="meta" data-key="' + ev.key + '"' + (S.evBusy ? ' disabled' : '') + '>直す</button></div>';
+    return h + '</div>';
+  }
+
+  function candRow(ev, role, x) {
+    var tag = x.ok ? '' : '<span class="out">' + (x.hasRoles ? '会場外' : '会場未登録') + '</span>';
+    var pref = x.pref === '積極的にやりたい' ? '<span class="pref hi">積極的</span>' : '<span class="pref">' + esc(x.pref) + '</span>';
+    var note = x.c.notes.length ? '<small class="tnote">△ ' + esc(x.c.notes.join('／')) + '</small>' : '';
+    var escortNote = role === 'escort' && x.pref === '条件付き' && S.roles[x.st.staffId].escort_note ? '<small class="tnote">条件：' + esc(S.roles[x.st.staffId].escort_note) + '</small>' : '';
+    return '<li class="' + (x.ok ? '' : 'outside') + '"><span class="nm">' + esc(x.st.name) + '</span>' + pref +
+      '<span class="av">' + x.c.label + '</span>' + tag +
+      '<button type="button" class="mini" data-act="assign" data-key="' + ev.key + '" data-staff="' + x.st.staffId + '" data-role="' + role + '"' + (S.evBusy ? ' disabled' : '') + '>担当にする</button>' +
+      note + escortNote + '</li>';
+  }
+
   // ================================================================ 描画まとめ
 
   function renderMonthLabels() {
@@ -538,10 +754,11 @@
   function renderAll() {
     if (!S.me) return;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === S.tab); });
-    ['mine', 'all', 'roles'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
+    ['mine', 'all', 'events', 'roles'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
     renderMonthLabels();
     renderMine();
     renderGrid();
+    renderEvents();
     renderRolesTable();
     renderSaveState();
   }

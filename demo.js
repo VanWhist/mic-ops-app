@@ -50,6 +50,48 @@
     return { availability: availability, roles: roles };
   }
 
+  // 架空の予定（本物のカレンダーとは無関係）
+  var EVENTS = [
+    { key: 'd1', title: 'O-air練習会', start: '2026-11-07 09:00', end: '2026-11-07 12:00', allDay: false, dates: ['2026-11-07'] },
+    { key: 'd2', title: '練習会 S-air', start: '2026-11-08', end: '2026-11-08', allDay: true, dates: ['2026-11-08'] },
+    { key: 'd3', title: '（仮）海外合宿', start: '2026-11-20', end: '2026-11-23', allDay: true, dates: ['2026-11-20', '2026-11-21', '2026-11-22', '2026-11-23'] },
+    { key: 'd4', title: 'ウォータージャンプ体験', location: 'O-air', start: '2026-11-15 10:00', end: '2026-11-15 12:00', allDay: false, dates: ['2026-11-15'], lesson: true },
+    { key: 'd5', title: 'ミーティング', start: '2026-11-28 19:00', end: '2026-11-28 20:00', allDay: false, dates: ['2026-11-28'] }
+  ];
+  var ROLES_FOR_TYPE = { '練習': ['coaching'], '一般レッスン': ['lesson'], '大会': ['escort'], '合宿': ['coaching', 'escort'], '未分類': ['coaching', 'lesson', 'escort'] };
+
+  function guessType(e) {
+    if (e.lesson) return '一般レッスン';
+    if (/大会/.test(e.title)) return '大会';
+    if (/合宿/.test(e.title)) return '合宿';
+    if (/練習/.test(e.title)) return '練習';
+    return '未分類';
+  }
+  function guessVenue(e) {
+    var t = (e.title + ' ' + (e.location || '')).toLowerCase().replace(/[\s-]/g, '');
+    var hits = VENUES.filter(function (v) { return t.indexOf(v.toLowerCase().replace(/[\s-]/g, '')) >= 0; });
+    return hits.length === 1 ? hits[0] : '';
+  }
+  function eventsOf(db, month) {
+    var meta = db.meta || {}, asg = db.assign || [];
+    var list = month === '2026-11' ? EVENTS : [];
+    return {
+      ok: true, month: month, orphans: [],
+      events: list.map(function (e) {
+        var m = meta[e.key] || {}, type = guessType(e), venue = guessVenue(e);
+        var ev = {
+          key: e.key, cal: e.lesson ? 'レッスン' : 'スケジュール', title: e.title, location: e.location || '',
+          start: e.start, end: e.end, allDay: e.allDay, dates: e.dates, tentative: /（仮）/.test(e.title),
+          typeAuto: type, venueAuto: venue, type: m.type || type, venue: m.venue ? (m.venue === 'なし' ? '' : m.venue) : venue,
+          typeFixed: !!m.type, venueFixed: !!m.venue
+        };
+        ev.roles = ROLES_FOR_TYPE[ev.type];
+        ev.assigned = asg.filter(function (a) { return a.key === e.key; }).map(function (a) { return { staffId: a.staffId, role: a.role }; });
+        return ev;
+      })
+    };
+  }
+
   function respond(obj) {
     return new Promise(function (resolve) { setTimeout(function () { resolve(JSON.parse(JSON.stringify(obj))); }, 350); });
   }
@@ -61,6 +103,20 @@
     var failing = /[?&]fail=1/.test(location.search);
     var db = load();
 
+    if (req.action === 'events') return respond(eventsOf(db, req.month));
+    if (req.action === 'assign' || req.action === 'setEventMeta') {
+      if (!me.isAdmin) return respond({ ok: false, error: 'forbidden', message: 'この操作は管理者のURLだけでできます' });
+      if (failing) return respond({ ok: false, error: 'server', message: 'デモ：わざと失敗させています（?fail=1）' });
+      if (req.action === 'assign') {
+        db.assign = (db.assign || []).filter(function (a) { return !(a.key === req.eventKey && a.staffId === req.staffId && a.role === req.role); });
+        if (req.on) db.assign.push({ key: req.eventKey, staffId: req.staffId, role: req.role });
+      } else {
+        db.meta = db.meta || {};
+        if (!req.type && !req.venue) delete db.meta[req.eventKey]; else db.meta[req.eventKey] = { type: req.type, venue: req.venue };
+      }
+      store(db);
+      return respond(eventsOf(db, req.month));
+    }
     if (req.action === 'bootstrap') {
       return respond({ ok: true, me: me, staff: NAMES, roles: db.roles, availability: db.availability, period: PERIOD, venues: VENUES });
     }

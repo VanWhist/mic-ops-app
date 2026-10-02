@@ -39,7 +39,7 @@ h1 { font-size: 17px; margin: 0; }
 .banner.error button { background: var(--ng); color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; }
 
 .tabs { display: flex; gap: 4px; padding: 8px 16px 0; }
-.tab { flex: 1; border: 1px solid var(--line); background: var(--card); border-radius: 8px 8px 0 0; padding: 8px 4px; font-size: 14px; }
+.tab { flex: 1; border: 1px solid var(--line); background: var(--card); border-radius: 8px 8px 0 0; padding: 8px 2px; font-size: 12px; white-space: nowrap; letter-spacing: -0.02em; }
 .tab.on { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
 
 main { padding: 0 16px 32px; max-width: 760px; margin: 0 auto; }
@@ -148,3 +148,49 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .roles-table td small { display: block; font-size: 11px; color: var(--muted); }
 .r-hi { color: var(--o); font-weight: 700; } .r-ok { color: var(--ink); } .r-cond { color: var(--t); } .r-no { color: var(--x); } .r-none { color: #b5bac4; }
 .roles-table tr.self .nm { font-weight: 700; }
+
+/* 予定と担当 */
+.ev-status { font-size: 13px; color: var(--muted); }
+.ev-status.ok { color: var(--o); } .ev-status.ng { color: var(--ng); font-weight: 700; }
+.ev { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 10px 0; background: var(--card); }
+.ev.open { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.ev-date { font-size: 13px; color: var(--muted); }
+.ev-title { font-size: 16px; margin: 2px 0 2px; }
+.ev-loc { font-size: 13px; color: var(--muted); }
+.badges { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.badge { font-size: 12px; border-radius: 4px; padding: 1px 6px; border: 1px solid var(--line); }
+.badge.type { background: #eef3fd; color: var(--accent); border-color: #cddaf5; }
+.badge.venue { background: var(--o-bg); color: var(--o); border-color: #b8e0c7; }
+.badge.novenue { color: var(--muted); }
+.badge.tent { background: var(--t-bg); color: var(--t); border-color: #f1d49a; font-weight: 700; }
+.badge.calsrc { color: var(--muted); }
+.ev-assigned { font-size: 14px; }
+.warn { color: var(--ng); font-size: 12px; font-weight: 700; }
+.ev-open { margin-top: 8px; width: 100%; border: 1px solid var(--line); background: #f8f9fb; border-radius: 8px; padding: 8px; font-size: 14px; }
+.ev-detail { margin-top: 10px; }
+.role-sec { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; }
+.role-sec h4, .ev-meta h4 { margin: 0 0 6px; font-size: 14px; }
+.cand { list-style: none; padding: 0; margin: 0; }
+.cand li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+.cand li .nm { font-weight: 700; min-width: 3em; }
+.cand li .mini { margin-left: auto; }
+.cand.assigned li { background: #eef3fd; border-radius: 6px; padding: 6px; }
+.cand li.outside { color: #9aa0ab; }
+.cand li.outside .nm { font-weight: 400; }
+.out { font-size: 11px; background: #eceef1; color: #6b7385; border-radius: 4px; padding: 0 5px; }
+.pref { font-size: 11px; color: var(--muted); }
+.pref.hi { color: var(--o); font-weight: 700; }
+.av { font-size: 12px; }
+.tnote { flex-basis: 100%; color: var(--t); font-size: 12px; }
+.rest { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+.mini { border: 0; background: var(--accent); color: #fff; border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+.mini.ghost { background: #fff; color: var(--ng); border: 1px solid #f0b8b3; }
+.mini:disabled { opacity: .5; }
+.ev-meta { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
+.ev-meta h4 { flex-basis: 100%; }
+.ev-meta select { font-size: 16px; padding: 4px; }
+.orphans { border: 1px solid #f0b8b3; background: var(--ng-bg); border-radius: 10px; padding: 8px 12px; margin: 8px 0; }
+.orphans h3 { font-size: 14px; color: var(--ng); margin: 0 0 4px; }
+.orphans ul { margin: 0; padding-left: 1.1em; font-size: 14px; }
+.orphans li { margin: 4px 0; }
+.orphans .moved { font-size: 13px; color: var(--muted); }
