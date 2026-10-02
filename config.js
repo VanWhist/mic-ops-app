@@ -6,5 +6,5 @@
  *   URL だけではデータは読めない（スタッフごとのトークンが必要）。
  */
 window.MIC_OPS_CONFIG = {
-  apiUrl: ''
+  apiUrl: 'https://script.google.com/macros/s/AKfycbwElXZG2BDKB21JFnvisc2prC-J0SieiOhGWeGUzzrcoFdmkSMIslXHdvE5VS1zNmDiZA/exec'
 };
