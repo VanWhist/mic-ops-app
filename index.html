@@ -103,6 +103,11 @@
           <input id="escortNote" type="text" maxlength="100" placeholder="例：日帰りのみ／週末だけ">
         </div>
       </fieldset>
+      <fieldset data-role="venues">
+        <legend>行ける会場（いくつでも）</legend>
+        <p class="hint">季節に関係なく、行ける会場すべてにチェックしてください。</p>
+        <div id="venueChoices" class="choices venues"></div>
+      </fieldset>
       <button type="submit" id="rolesSave" class="primary">保存</button>
       <span id="rolesMsg" class="roles-msg" role="status" aria-live="polite"></span>
     </form>

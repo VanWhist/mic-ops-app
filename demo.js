@@ -8,12 +8,13 @@
  */
 (function () {
   'use strict';
-  var KEY = 'mic-ops-demo-v1';
+  var KEY = 'mic-ops-demo-v2';
   var NAMES = 'ABCDEFGHIJKL'.split('').map(function (c, i) {
     return { staffId: 'S' + String(i + 1).padStart(3, '0'), name: 'スタッフ' + c };
   });
   var PERIOD = { start: '2026-11', end: '2027-03' };
   var STATUSES = ['○', '△', '×'];
+  var VENUES = ['O-air', 'S-air', '佐野坂', '白馬'];
 
   function load() {
     try { var s = JSON.parse(localStorage.getItem(KEY)); if (s && s.availability) return s; } catch (e) { /* 使えない環境でも動かす */ }
@@ -43,6 +44,7 @@
           escort: ['可能', '条件付き', '難しい'][Math.floor(rnd() * 3)], escort_note: '', updated: ''
         };
         if (roles[st.staffId].escort === '条件付き') roles[st.staffId].escort_note = '日帰りのみ';
+        roles[st.staffId].venues = VENUES.filter(function () { return rnd() < 0.6; });
       }
     });
     return { availability: availability, roles: roles };
@@ -60,7 +62,7 @@
     var db = load();
 
     if (req.action === 'bootstrap') {
-      return respond({ ok: true, me: me, staff: NAMES, roles: db.roles, availability: db.availability, period: PERIOD });
+      return respond({ ok: true, me: me, staff: NAMES, roles: db.roles, availability: db.availability, period: PERIOD, venues: VENUES });
     }
     if (!me.staffId) return respond({ ok: false, error: 'forbidden', message: '管理者のURLでは入力できません' });
     if (failing) return respond({ ok: false, error: 'server', message: 'デモ：わざと失敗させています（?fail=1）' });
@@ -80,7 +82,11 @@
     }
     if (req.action === 'saveRoles') {
       var r = req.roles;
-      db.roles[me.staffId] = { coaching: r.coaching, lesson: r.lesson, escort: r.escort, escort_note: r.escort === '条件付き' ? String(r.escort_note || '').trim().slice(0, 100) : '' };
+      db.roles[me.staffId] = {
+        coaching: r.coaching, lesson: r.lesson, escort: r.escort,
+        escort_note: r.escort === '条件付き' ? String(r.escort_note || '').trim().slice(0, 100) : '',
+        venues: VENUES.filter(function (v) { return (r.venues || []).indexOf(v) >= 0; })
+      };
       store(db);
       return respond({ ok: true, roles: db.roles[me.staffId] });
     }

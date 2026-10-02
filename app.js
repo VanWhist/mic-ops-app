@@ -172,7 +172,7 @@
     if (DEMO) show('demoBanner');
     if (!token) return fatal('URLが正しくありません。管理者から届いたURLをそのまま開いてください。');
     api('bootstrap').then(function (r) {
-      S.me = r.me; S.staff = r.staff; S.roles = r.roles || {}; S.avail = r.availability || {}; S.period = r.period;
+      S.me = r.me; S.staff = r.staff; S.roles = r.roles || {}; S.avail = r.availability || {}; S.period = r.period; S.venues = r.venues || [];
       var t = todayJst().slice(0, 7);
       var months = monthsOf(S.period);
       S.month = months.indexOf(t) >= 0 ? t : months[0];
@@ -444,6 +444,13 @@
       }).join('');
     });
     byId('escortNote').value = cur.escort_note || '';
+    var curVenues = cur.venues || [];
+    form.querySelector('[data-role="venues"]').hidden = S.venues.length === 0;   // 旧版の API では出さない
+    byId('venueChoices').innerHTML = S.venues.map(function (v, i) {
+      var id = 'v-' + i;
+      return '<input type="checkbox" name="venue" id="' + id + '" value="' + esc(v) + '"' + (curVenues.indexOf(v) >= 0 ? ' checked' : '') + '>' +
+        '<label for="' + id + '">' + esc(v) + '</label>';
+    }).join('');
     form.addEventListener('change', function () {
       toggleEscortNote();
       setRolesMsg('', '');
@@ -457,6 +464,7 @@
         roles[rd.key] = c ? c.value : '';
       });
       roles.escort_note = roles.escort === '条件付き' ? byId('escortNote').value : '';
+      roles.venues = Array.prototype.map.call(form.querySelectorAll('input[name="venue"]:checked'), function (x) { return x.value; });
       var btn = byId('rolesSave');
       btn.disabled = true;
       setRolesMsg('保存中…', 'busy');
@@ -483,7 +491,7 @@
   }
 
   function renderRolesTable() {
-    var h = '<thead><tr><th></th>' + ROLE_DEF.map(function (rd) { return '<th>' + rd.short + '</th>'; }).join('') + '</tr></thead><tbody>';
+    var h = '<thead><tr><th></th>' + ROLE_DEF.map(function (rd) { return '<th>' + rd.short + '</th>'; }).join('') + '<th>会場</th></tr></thead><tbody>';
     S.staff.forEach(function (st) {
       var r = S.roles[st.staffId];
       h += '<tr' + (st.staffId === S.me.staffId ? ' class="self"' : '') + '><th class="nm">' + esc(st.name) + '</th>';
@@ -493,6 +501,8 @@
         var label = v === '積極的にやりたい' ? '積極的' : (v || '未登録');
         h += '<td class="' + cls + '">' + esc(label) + (rd.key === 'escort' && r && r.escort_note ? '<small>' + esc(r.escort_note) + '</small>' : '') + '</td>';
       });
+      var vs = r && r.venues;
+      h += '<td class="venues ' + (vs && vs.length ? '' : 'r-none') + '">' + (!r ? '未登録' : (vs && vs.length ? esc(vs.join('・')) : 'なし')) + '</td>';
       h += '</tr>';
     });
     byId('rolesTable').innerHTML = h + '</tbody>';
