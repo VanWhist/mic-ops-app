@@ -256,3 +256,6 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .add-staff input { font-size: 16px; }
 .danger { min-height: 44px; border: 2px solid var(--ng); color: var(--ng); background: #fff; border-radius: 8px; padding: 6px 14px; font-weight: 700; }
 .danger:disabled, #addStaffBtn:disabled { opacity: .5; }
+
+.note-edit { border: 1px solid var(--line); background: #fff; color: var(--accent); border-radius: 6px; padding: 4px 10px; min-height: 36px; font-size: 13px; margin-left: 4px; }
+.note-list li { margin: 4px 0; }

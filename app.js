@@ -395,6 +395,17 @@
       if (cell) onDayTap(cell.dataset.date);
     });
     byId('noteSave').addEventListener('click', saveNote);
+    // △の備考は、下の一覧の「備考を直す」から開く（△の日をもう一度タップすると消えるため）
+    byId('mineSummary').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-note-date]');
+      if (!b) return;
+      var d = b.dataset.noteDate;
+      S.noteDates = [d];
+      renderMine();
+      byId('noteInput').value = valueOf(S.me.staffId, d).n;
+      byId('notePanel').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      byId('noteInput').focus();
+    });
     byId('noteInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); saveNote(); } });
   }
 
@@ -404,13 +415,16 @@
       var a = S.rangeStart;
       S.rangeStart = null;
       paint(between(a, date).filter(inPeriod));
+    } else if (S.pen && valueOf(S.me.staffId, date).s === S.pen) {
+      // 同じ印の日をもう一度タップしたら消す（未回答に戻す）
+      paint([date], '');
     } else {
       paint([date]);
     }
   }
 
-  function paint(dates) {
-    var pen = S.pen;
+  function paint(dates, penOverride) {
+    var pen = penOverride == null ? S.pen : penOverride;
     dates.forEach(function (d) {
       var cur = valueOf(S.me.staffId, d);
       setPending(d, pen, pen === '△' && cur.s === '△' ? cur.n : '');
@@ -449,7 +463,7 @@
     });
     byId('hint').textContent = S.range
       ? (S.rangeStart ? md(S.rangeStart) + ' から。終わりの日をタップしてください' : '始まりの日をタップしてください')
-      : '印を選んで日付をタップ。もう一度タップしても同じ印のままです（変えるときは印を選び直す）';
+      : '印を選んで日付をタップ。間違えたら、同じ印のままもう一度タップすると消えます';
     byId('rangeSteps').hidden = !S.range;
     byId('rangeSteps').querySelectorAll('.step').forEach(function (el) {
       el.classList.toggle('now', el.dataset.step === (S.rangeStart ? '2' : '1'));
@@ -492,7 +506,8 @@
     var answered = mine.filter(function (x) { return x[1].s; }).length;
     var offMissing = mine.filter(function (x) { return !x[1].s && isOff(x[0]); }).length;
     var notes = mine.filter(function (x) { return x[1].s === '△'; }).map(function (x) {
-      return '<li>' + md(x[0]) + '（' + WD[weekday(x[0])] + '）△ ' + (x[1].n ? esc(x[1].n) : '<span class="muted">備考なし</span>') + '</li>';
+      return '<li>' + md(x[0]) + '（' + WD[weekday(x[0])] + '）△ ' + (x[1].n ? esc(x[1].n) : '<span class="muted">備考なし</span>') +
+        ' <button type="button" class="note-edit" data-note-date="' + x[0] + '">備考を直す</button></li>';
     });
     byId('mineSummary').innerHTML = '入力済み ' + answered + '日／土日祝で未回答 <strong>' + offMissing + '日</strong>' +
       (notes.length ? '<ul class="note-list">' + notes.join('') + '</ul>' : '');
