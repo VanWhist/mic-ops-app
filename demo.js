@@ -117,6 +117,13 @@
       store(db);
       return respond(eventsOf(db, req.month));
     }
+    if (/^(staffList|staffUrl|reissueToken|setActive|addStaff|reissueAdmin)$/.test(req.action)) {
+      if (!me.isAdmin) return respond({ ok: false, error: 'forbidden', message: 'この操作は管理者のURLだけでできます' });
+      var fake = 'demo' + Math.random().toString(16).slice(2);
+      if (req.action === 'staffList' || req.action === 'setActive') return respond({ ok: true, staff: NAMES.map(function (n) { return { staffId: n.staffId, name: n.name, active: true }; }) });
+      if (req.action === 'addStaff') return respond({ ok: true, staffId: 'S013', name: req.name, token: fake });
+      return respond({ ok: true, staffId: req.staffId, token: fake });
+    }
     if (req.action === 'bootstrap') {
       return respond({ ok: true, me: me, staff: NAMES, roles: db.roles, availability: db.availability, period: PERIOD, venues: VENUES });
     }

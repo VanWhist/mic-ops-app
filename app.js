@@ -301,6 +301,7 @@
     setupAll();
     setupRoles();
     setupEvents();
+    setupStaffAdmin();
     renderAll();
     if (S.tab === 'events') loadEvents(S.month);
   }
@@ -320,7 +321,7 @@
         // URL が無効化・再発行された。前回の内容も消して、何も出さない
         dropLocalCache();
         S.dead = true;
-        ['tabs', 'tab-mine', 'tab-all', 'tab-events', 'tab-roles', 'staleBanner', 'errorBanner'].forEach(hide);
+        ['tabs', 'tab-mine', 'tab-all', 'tab-events', 'tab-roles', 'tab-staff', 'staleBanner', 'errorBanner'].forEach(hide);
         byId('asOf').textContent = '';
         return fatal('このURLは使えません。管理者に新しいURLをもらってください。');
       }
@@ -347,7 +348,13 @@
     nav.hidden = false;
     nav.querySelectorAll('.tab').forEach(function (b) {
       if (S.me.isAdmin && b.dataset.tab === 'mine') b.hidden = true;
-      b.addEventListener('click', function () { S.tab = b.dataset.tab; renderAll(); if (S.tab === 'events') loadEvents(S.month); });
+      if (b.dataset.tab === 'staff') b.hidden = !S.me.isAdmin;
+      b.addEventListener('click', function () {
+        S.tab = b.dataset.tab;
+        renderAll();
+        if (S.tab === 'events') loadEvents(S.month);
+        if (S.tab === 'staff') loadStaffAdmin();
+      });
     });
     document.querySelectorAll('.month-nav').forEach(function (nav) {
       nav.querySelector('.prev').addEventListener('click', function () { moveMonth(-1); });
@@ -929,6 +936,132 @@
       note + escortNote + '</li>';
   }
 
+  // ================================================================ スタッフ管理（④・管理者だけ）
+  //
+  // ★ トークン（URL）は、表示しているあいだ画面の入力欄にあるだけ。状態にも端末にも保存しない。
+
+  function appUrlFor(t) { return location.origin + location.pathname + '#t=' + t; }
+
+  function setupStaffAdmin() {
+    if (!S.me.isAdmin) return;
+    S.staffAdmin = null;
+    byId('staffAdminList').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-act]');
+      if (!b || b.disabled || S.stBusy) return;
+      var id = b.dataset.staff, name = b.dataset.name;
+      if (b.dataset.act === 'url') {
+        staffOp('staffUrl', { staffId: id }, function (r) { showUrl(name + 'さんのURL（本人にだけ送ってください）', r.token); });
+      } else if (b.dataset.act === 'reissue') {
+        if (!window.confirm(name + 'さんのURLを再発行します。\n今のURLはすぐ使えなくなります。よろしいですか？')) return;
+        staffOp('reissueToken', { staffId: id }, function (r) {
+          showUrl(name + 'さんの新しいURL（古いURLはもう使えません。本人にだけ送ってください）', r.token);
+          loadStaffAdmin(true);
+          refreshBoot();
+        });
+      } else if (b.dataset.act === 'disable' || b.dataset.act === 'enable') {
+        var on = b.dataset.act === 'enable';
+        if (!on && !window.confirm(name + 'さんのURLを無効にします。\nすぐ使えなくなり、みんなの予定にも出なくなります（入力済みの予定は消えません）。よろしいですか？')) return;
+        staffOp('setActive', { staffId: id, active: on }, function (r) { S.staffAdmin = r.staff; hideUrl(); refreshBoot(); });
+      }
+    });
+    byId('addStaffBtn').addEventListener('click', function () {
+      var name = byId('newName').value.trim();
+      if (!name) { setStStatus('ng', '表示名を入れてください'); return; }
+      staffOp('addStaff', { name: name }, function (r) {
+        byId('newName').value = '';
+        showUrl(r.name + 'さん（' + r.staffId + '）を追加しました。URL（本人にだけ送ってください）', r.token);
+        loadStaffAdmin(true);
+        refreshBoot();
+      });
+    });
+    byId('reissueAdminBtn').addEventListener('click', function () {
+      if (!window.confirm('管理者URLを再発行します。\n今開いているこのURLもすぐ使えなくなります。新しいURLを必ず控えてください。よろしいですか？')) return;
+      staffOp('reissueAdmin', {}, function (r) {
+        dropLocalCache();   // 古いURLの前回の内容は使わない
+        showUrl('新しい管理者URL（必ず控えてください。今のURLはもう使えません）', r.token);
+        S.newAdminUrl = appUrlFor(r.token);
+        byId('openNewAdmin').hidden = false;
+      });
+    });
+    byId('copyUrl').addEventListener('click', function () {
+      var input = byId('urlText');
+      var done = function () { byId('copyMsg').textContent = '✓ コピーしました'; };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(input.value).then(done, function () { input.select(); byId('copyMsg').textContent = '選択しました。長押しでコピーしてください'; });
+      } else { input.select(); byId('copyMsg').textContent = '選択しました。長押しでコピーしてください'; }
+    });
+    byId('openNewAdmin').addEventListener('click', function () {
+      if (!S.newAdminUrl) return;
+      location.replace(S.newAdminUrl);
+      location.reload();
+    });
+    byId('hideUrl').addEventListener('click', hideUrl);
+  }
+
+  function showUrl(label, t) {
+    byId('urlLabel').textContent = label;
+    byId('urlText').value = appUrlFor(t);
+    byId('copyMsg').textContent = '';
+    byId('openNewAdmin').hidden = true;
+    byId('urlBox').hidden = false;
+    byId('urlBox').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function hideUrl() {
+    byId('urlBox').hidden = true;
+    byId('urlText').value = '';   // 画面からも消す
+    byId('copyMsg').textContent = '';
+  }
+
+  function setStStatus(kind, text) {
+    var el = byId('stStatus');
+    el.textContent = text;
+    el.className = 'ev-status ' + kind;
+  }
+
+  function loadStaffAdmin(force) {
+    if (!S.me.isAdmin || (S.staffAdmin && !force)) { renderStaffAdmin(); return; }
+    setStStatus('busy', '読み込み中…');
+    api('staffList').then(function (r) {
+      S.staffAdmin = r.staff;
+      setStStatus('', '');
+    }, function (e) {
+      setStStatus('ng', '⚠ 読み込めませんでした：' + e.message);
+    }).then(renderStaffAdmin);
+  }
+
+  function staffOp(action, payload, done) {
+    S.stBusy = true;
+    setStStatus('busy', '保存中…');
+    renderStaffAdmin();
+    api(action, payload).then(function (r) {
+      setStStatus('ok', '✓ 保存しました');
+      done(r);
+    }, function (e) {
+      setStStatus('ng', '⚠ できませんでした：' + e.message);
+    }).then(function () { S.stBusy = false; renderStaffAdmin(); });
+  }
+
+  function renderStaffAdmin() {
+    if (!S.me || !S.me.isAdmin) return;
+    var list = S.staffAdmin || [];
+    byId('staffAdminList').innerHTML = list.map(function (st) {
+      var dis = S.stBusy ? ' disabled' : '';
+      var nm = esc(st.name), id = esc(st.staffId);
+      return '<li class="' + (st.active ? '' : 'inactive') + '"><div class="who"><b>' + nm + '</b><small>' + id + '</small>' +
+        '<span class="badge ' + (st.active ? 'venue' : 'novenue') + '">' + (st.active ? '有効' : '無効') + '</span></div>' +
+        '<div class="acts">' +
+        (st.active ? '<button type="button" class="mini" data-act="url" data-staff="' + id + '" data-name="' + nm + '"' + dis + '>URLを表示</button>' : '') +
+        '<button type="button" class="mini" data-act="reissue" data-staff="' + id + '" data-name="' + nm + '"' + dis + '>再発行</button>' +
+        (st.active
+          ? '<button type="button" class="mini ghost" data-act="disable" data-staff="' + id + '" data-name="' + nm + '"' + dis + '>無効にする</button>'
+          : '<button type="button" class="mini" data-act="enable" data-staff="' + id + '" data-name="' + nm + '"' + dis + '>有効に戻す</button>') +
+        '</div></li>';
+    }).join('');
+    byId('addStaffBtn').disabled = !!S.stBusy;
+    byId('reissueAdminBtn').disabled = !!S.stBusy;
+  }
+
   // ================================================================ 描画まとめ
 
   function renderMonthLabels() {
@@ -959,7 +1092,7 @@
   function renderAll() {
     if (!S.me || !S.uiReady || S.dead) return;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === S.tab); });
-    ['mine', 'all', 'events', 'roles'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
+    ['mine', 'all', 'events', 'roles', 'staff'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
     renderMonthLabels();
     renderMine();
     renderGrid();

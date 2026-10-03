@@ -36,6 +36,7 @@
   <button type="button" data-tab="all" class="tab">みんなの予定</button>
   <button type="button" data-tab="events" class="tab">予定と担当</button>
   <button type="button" data-tab="roles" class="tab">役割の希望</button>
+  <button type="button" data-tab="staff" class="tab" hidden>スタッフ管理</button>
 </nav>
 
 <main>
@@ -121,6 +122,35 @@
     <p class="hint">予定は「MICスケジュール」「MICレッスン」から読んでいます（読むだけ）。</p>
     <div id="evOrphans"></div>
     <div id="evList"></div>
+  </section>
+
+  <!-- スタッフ管理（管理者だけ） -->
+  <section id="tab-staff" class="panel" hidden>
+    <p class="hint">URLは<strong>本人にだけ</strong>送ってください。再発行・無効にすると、古いURLはすぐ使えなくなります（入力済みの予定は消えません）。</p>
+    <div id="urlBox" class="url-box" hidden>
+      <p id="urlLabel" class="url-label"></p>
+      <input id="urlText" type="text" readonly aria-label="URL">
+      <div class="url-actions">
+        <button id="copyUrl" type="button" class="primary">コピー</button>
+        <button id="openNewAdmin" type="button" class="primary" hidden>新しいURLで開き直す</button>
+        <button id="hideUrl" type="button" class="link-btn">閉じる</button>
+      </div>
+      <p id="copyMsg" class="copy-msg" role="status" aria-live="polite"></p>
+    </div>
+    <div id="stStatus" class="ev-status" role="status" aria-live="polite"></div>
+    <ul id="staffAdminList" class="staff-list"></ul>
+    <div class="add-staff">
+      <h3>スタッフを追加</h3>
+      <div class="note-row">
+        <input id="newName" type="text" maxlength="20" placeholder="表示名（例：姓）" autocomplete="off">
+        <button id="addStaffBtn" type="button">追加</button>
+      </div>
+    </div>
+    <div class="admin-url">
+      <h3>管理者URL</h3>
+      <p class="hint">管理者URLが他の人に知られたかもしれないときに再発行します。<strong>今開いているこのURLもすぐ使えなくなる</strong>ので、新しいURLを必ず控えてください。</p>
+      <button id="reissueAdminBtn" type="button" class="danger">管理者URLを再発行</button>
+    </div>
   </section>
 
   <!-- 役割の希望 -->

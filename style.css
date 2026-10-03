@@ -236,3 +236,23 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .help ol { list-style: none; margin: 6px 0 8px; padding: 0; display: grid; gap: 4px; }
 .help .num { display: inline-block; width: 1.6em; color: var(--accent); font-weight: 700; }
 #helpClose { width: 100%; min-height: 44px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; }
+
+/* スタッフ管理 */
+.staff-list { list-style: none; padding: 0; margin: 8px 0; }
+.staff-list li { border-bottom: 1px solid var(--line); padding: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
+.staff-list li.inactive .who b { color: var(--muted); }
+.staff-list .who { display: flex; align-items: center; gap: 6px; font-size: 16px; }
+.staff-list .who small { color: var(--muted); font-size: 12px; }
+.staff-list .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.staff-list .mini { min-height: 40px; }
+.url-box { border: 2px solid var(--accent); border-radius: 10px; padding: 10px; margin: 8px 0; background: #eef3fd; }
+.url-label { margin: 0 0 6px; font-weight: 700; font-size: 14px; }
+.url-box input { width: 100%; font-size: 14px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.url-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.url-actions .primary { min-height: 44px; }
+.copy-msg { margin: 6px 0 0; font-size: 13px; color: var(--o); }
+.add-staff, .admin-url { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 8px; }
+.add-staff h3, .admin-url h3 { font-size: 15px; margin: 0 0 6px; }
+.add-staff input { font-size: 16px; }
+.danger { min-height: 44px; border: 2px solid var(--ng); color: var(--ng); background: #fff; border-radius: 8px; padding: 6px 14px; font-weight: 700; }
+.danger:disabled, #addStaffBtn:disabled { opacity: .5; }
