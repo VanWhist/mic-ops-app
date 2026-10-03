@@ -36,10 +36,10 @@ h1 { font-size: 17px; margin: 0; }
 .banner { margin: 8px 16px 0; padding: 10px 12px; border-radius: 8px; font-size: 14px; }
 .banner.demo { background: #eef3fd; color: #20457f; }
 .banner.error { background: var(--ng-bg); color: var(--ng); display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-.banner.error button { background: var(--ng); color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; }
+.banner.error button, .banner.stale button { background: var(--ng); color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; min-height: 44px; font-size: 15px; font-weight: 700; }
 
 .tabs { display: flex; gap: 4px; padding: 8px 16px 0; }
-.tab { flex: 1; border: 1px solid var(--line); background: var(--card); border-radius: 8px 8px 0 0; padding: 8px 2px; font-size: 12px; white-space: nowrap; letter-spacing: -0.02em; }
+.tab { flex: 1; min-height: 46px; border: 1px solid var(--line); background: var(--card); border-radius: 8px 8px 0 0; padding: 6px 1px; font-size: 14px; white-space: nowrap; letter-spacing: -0.06em; }
 .tab.on { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
 
 main { padding: 0 16px 32px; max-width: 760px; margin: 0 auto; }
@@ -48,18 +48,19 @@ main { padding: 0 16px 32px; max-width: 760px; margin: 0 auto; }
 .fatal { color: var(--ng); }
 
 .month-nav { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 8px; }
-.month-nav button { width: 44px; height: 40px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; font-size: 22px; line-height: 1; }
+.month-nav button { width: 48px; height: 46px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; font-size: 24px; line-height: 1; }
 .month-nav button:disabled { opacity: .3; }
 .month-label { font-size: 18px; font-weight: 700; min-width: 7.5em; text-align: center; }
 
 .pens { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-.pen { border: 2px solid var(--line); background: var(--card); border-radius: 10px; padding: 6px 2px; font-size: 12px; display: flex; flex-direction: column; align-items: center; }
-.pen b { font-size: 22px; line-height: 1.1; }
+.pen { position: relative; min-height: 64px; border: 2px solid var(--line); background: var(--card); border-radius: 10px; padding: 6px 2px; font-size: 15px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.pen b { font-size: 24px; line-height: 1.1; }
 .pen[data-pen="○"] b { color: var(--o); }
 .pen[data-pen="△"] b { color: var(--t); }
 .pen[data-pen="×"] b { color: var(--x); }
 .pen[data-pen=""] b { color: var(--muted); font-size: 17px; line-height: 1.4; }
-.pen.on { border-color: var(--accent); background: #eef3fd; box-shadow: 0 0 0 1px var(--accent) inset; }
+.pen.on { border: 3px solid var(--accent); background: #dbe6fb; box-shadow: 0 2px 6px rgba(31, 95, 191, .25); font-weight: 700; }
+.pen.on::after { content: '✓'; position: absolute; top: -8px; right: -6px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 14px; line-height: 22px; text-align: center; font-weight: 700; }
 .range-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 10px 0 0; font-size: 15px; }
 .range-toggle input { width: 20px; height: 20px; }
 .hint { font-size: 13px; color: var(--muted); margin: 6px 0 8px; }
@@ -72,7 +73,7 @@ main { padding: 0 16px 32px; max-width: 760px; margin: 0 auto; }
   background: var(--n-bg); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0;
   -webkit-user-select: none; user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
 }
-.day .dn { position: absolute; top: 2px; left: 5px; font-size: 11px; color: var(--muted); }
+.day .dn { position: absolute; top: 2px; left: 5px; font-size: 13px; color: var(--muted); }
 .day.sun .dn { color: var(--sun); font-weight: 700; } .day.sat .dn { color: var(--sat); font-weight: 700; }
 .day .mk { font-size: 22px; font-weight: 700; line-height: 1; margin-top: 6px; }
 .day .nd { position: absolute; bottom: 4px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--t); }
@@ -82,7 +83,7 @@ main { padding: 0 16px 32px; max-width: 760px; margin: 0 auto; }
 .day.pending { border-style: dashed; border-color: var(--accent); }
 .day.failed { border: 2px solid var(--ng); }
 .day.range-start { box-shadow: 0 0 0 3px var(--accent); }
-.day.today::after { content: '今日'; position: absolute; bottom: 1px; left: 4px; font-size: 9px; color: var(--accent); }
+.day.today::after { content: '今日'; position: absolute; bottom: 1px; left: 4px; font-size: 11px; color: var(--accent); font-weight: 700; }
 
 .note-panel { margin-top: 12px; padding: 10px; border: 1px solid #f1d49a; background: #fffaf0; border-radius: 10px; }
 .note-panel label { font-weight: 700; font-size: 14px; }
@@ -96,14 +97,14 @@ main { padding: 0 16px 32px; max-width: 760px; margin: 0 auto; }
 
 .all-tools { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; }
 .all-tools input { width: 18px; height: 18px; vertical-align: -3px; }
-.link-btn { border: 0; background: none; color: var(--accent); text-decoration: underline; padding: 6px 0; }
-.grid-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 8px; }
+.link-btn { border: 0; background: none; color: var(--accent); text-decoration: underline; padding: 6px 4px; min-height: 44px; font-size: 15px; }
+.grid-wrap { overflow: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 8px; max-height: 70vh; }
 .grid, .roles-table { border-collapse: separate; border-spacing: 0; font-size: 14px; }
 .grid th, .grid td { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); text-align: center; padding: 0; min-width: 34px; height: 34px; }
 .grid .nm, .roles-table .nm { position: sticky; left: 0; background: var(--card); z-index: 1; text-align: left; padding: 0 8px; white-space: nowrap; font-weight: 400; min-width: 4.5em; }
-.grid .corner { position: sticky; left: 0; background: var(--card); z-index: 2; font-size: 12px; color: var(--muted); }
+.grid .corner { position: sticky; left: 0; top: 0; background: var(--card); z-index: 3; font-size: 12px; color: var(--muted); }
 .grid .dh button { border: 0; background: none; width: 100%; height: 40px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; font-weight: 700; }
-.grid .dh small { font-size: 10px; font-weight: 400; }
+.grid .dh small { font-size: 12px; font-weight: 400; }
 .grid .dh.sun button { color: var(--sun); } .grid .dh.sat button { color: var(--sat); }
 .grid .dh.sel { background: #dbe6fb; }
 .grid td { position: relative; font-weight: 700; }
@@ -207,3 +208,31 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .orphans ul { margin: 0; padding-left: 1.1em; font-size: 14px; }
 .orphans li { margin: 4px 0; }
 .orphans .moved { font-size: 13px; color: var(--muted); }
+
+/* 見出しを上に固定（表の中でスクロール）・今日の列 */
+.grid thead th { position: sticky; top: 0; z-index: 2; background: var(--card); }
+.grid .dh.today { background: #fff6d6; }
+.grid .dh.today button::after { content: '今日'; font-size: 11px; color: var(--t); font-weight: 700; }
+.grid td.today { box-shadow: inset 2px 0 0 #e7b53c, inset -2px 0 0 #e7b53c; }
+
+/* 時点の表示・前回の内容 */
+.top-sub { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-height: 20px; }
+.as-of { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.banner.stale { background: var(--t-bg); color: #7a4a00; display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.banner.stale button { background: #b26a00; }
+
+/* いま入力中の印・期間の手順 */
+.pen-now { margin: 8px 0 6px; padding: 8px 10px; border-radius: 8px; background: #eef3fd; font-size: 15px; font-weight: 700; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+.pen-now .mk { width: 28px; height: 28px; line-height: 28px; font-size: 18px; }
+.range-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 0; padding: 8px; border: 2px solid var(--accent); border-radius: 10px; background: #fff; font-size: 15px; }
+.range-steps .step { padding: 4px 8px; border-radius: 6px; color: var(--muted); font-weight: 700; }
+.range-steps .step.now { background: var(--accent); color: #fff; font-weight: 700; }
+.range-steps .step.done { text-decoration: line-through; }
+.range-steps .arrow { color: var(--muted); }
+#rangeCancel { flex-basis: 100%; min-height: 44px; padding: 6px 16px; border: 2px solid var(--ng); color: var(--ng); background: #fff; border-radius: 8px; font-size: 15px; font-weight: 700; }
+
+/* 初回だけの使い方 */
+.help { margin: 0 0 10px; padding: 10px 12px; border: 2px solid var(--accent); border-radius: 10px; background: #eef3fd; font-size: 15px; }
+.help ol { list-style: none; margin: 6px 0 8px; padding: 0; display: grid; gap: 4px; }
+.help .num { display: inline-block; width: 1.6em; color: var(--accent); font-weight: 700; }
+#helpClose { width: 100%; min-height: 44px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; }

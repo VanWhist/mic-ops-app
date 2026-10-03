@@ -36,8 +36,96 @@
     tab: 'mine', month: null, pen: '○', range: false, rangeStart: null,
     pending: {}, failed: {}, inflight: false, timer: null, error: null, lastSaved: null,
     noteDates: [], weekendOnly: true, selectedDay: null,
-    events: {}, openEvent: null, evBusy: false, evMsg: null
+    events: {}, openEvent: null, evBusy: false, evMsg: null,
+    uiReady: false, dead: false, bootAt: 0, fromCache: false, refreshing: false, stale: false,
+    savedAt: {}, rolesSavedAt: 0, rolesDirty: false, deferRender: false, selKeep: {}
   };
+
+  // ================================================================ 端末内キャッシュ（前回の内容をすぐ出す）
+  //
+  // 開いたらまず前回の内容を出し、裏で最新を取り直す。
+  // ★ キーは「トークンのハッシュ＋版番号」。トークンそのものはキーにも値にも入れない。
+  //   別の人の URL を同じ端末で開いても、前の人の内容は出ない（キーが違う）。
+  // ★ 保存しておく形を変えたら CACHE_VER を上げる（古い形は読まれなくなる）。
+  // ★ 保存に成功するたびに書き直す（開き直したときに、保存した日が消えて見えないように）。
+  // ★ 最新を取れなかったら、前回の内容であることを必ず画面に出す。
+  var CACHE_VER = 'v1';
+  var cacheKey = null;
+
+  function makeCacheKey() {
+    try {
+      if (!window.crypto || !window.crypto.subtle || !window.TextEncoder) return Promise.resolve(null);
+      return window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)).then(function (buf) {
+        var hex = Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+        return 'micops_' + CACHE_VER + '_' + hex.slice(0, 32);
+      }, function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+
+  function loadCache() {
+    if (!cacheKey) return null;
+    try {
+      var c = JSON.parse(localStorage.getItem(cacheKey));
+      return c && c.boot && c.boot.me && Array.isArray(c.boot.staff) && c.boot.period ? c : null;
+    } catch (e) { return null; }
+  }
+
+  function saveCache() {
+    if (!cacheKey || !S.me || !S.bootAt || S.dead) return;
+    var events = {};
+    Object.keys(S.events).forEach(function (m) {
+      var e = S.events[m];
+      if (e && e.data && e.at) events[m] = { data: e.data, at: e.at };
+    });
+    var boot = { me: S.me, staff: S.staff, roles: S.roles, availability: S.avail, period: S.period, venues: S.venues };
+    try { localStorage.setItem(cacheKey, JSON.stringify({ savedAt: Date.now(), bootAt: S.bootAt, boot: boot, events: events })); }
+    catch (e) { /* 容量不足などでも、キャッシュなしで動く */ }
+  }
+
+  function dropLocalCache() {
+    if (!cacheKey) return;
+    try { localStorage.removeItem(cacheKey); } catch (e) { /* なにもしない */ }
+  }
+
+  /** bootstrap の結果を画面の状態へ入れる。fetchStart 以降に保存した自分の日・役割は手元の値を残す */
+  function applyBoot(r, fetchStart) {
+    var fresh = r.availability || {};
+    var meId = r.me && r.me.staffId;
+    if (fetchStart && meId && S.avail[meId]) {
+      var oldMine = S.avail[meId];
+      var newMine = fresh[meId] || (fresh[meId] = {});
+      Object.keys(S.savedAt).forEach(function (d) {
+        if (S.savedAt[d] < fetchStart) return;   // 取得より前の保存は、取得結果に入っている
+        if (oldMine[d]) newMine[d] = oldMine[d]; else delete newMine[d];
+      });
+    }
+    var roles = r.roles || {};
+    if (fetchStart && meId && S.rolesSavedAt >= fetchStart && S.roles[meId]) roles[meId] = S.roles[meId];
+    S.me = r.me; S.staff = r.staff; S.roles = roles; S.avail = fresh; S.period = r.period; S.venues = r.venues || [];
+  }
+
+  /** 入力中（文字入力・プルダウン）は描き直さず、終わってから描く */
+  function renderSafe() {
+    var el = document.activeElement;
+    if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && el.type !== 'checkbox' && el.type !== 'radio') { S.deferRender = true; renderAsOf(); return; }
+    S.deferRender = false;
+    renderAll();
+  }
+
+  function clock(ms) {
+    var d = new Date(ms), now = new Date();
+    var hm = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    return d.toDateString() === now.toDateString() ? hm : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hm;
+  }
+
+  function renderAsOf() {
+    var el = byId('asOf');
+    if (!S.bootAt) { el.textContent = ''; return; }
+    el.textContent = clock(S.bootAt) + '時点' + (S.refreshing ? '・最新を確認中…' : '');
+    var b = byId('staleBanner');
+    b.hidden = !S.stale;
+    if (S.stale) byId('staleText').textContent = '最新を取得できませんでした。前回開いたときの内容です（' + clock(S.bootAt) + '時点）';
+  }
 
   // ================================================================ 通信
 
@@ -152,11 +240,13 @@
       var mine = S.avail[S.me.staffId] || (S.avail[S.me.staffId] = {});
       r.saved.forEach(function (x) {
         if (x.status) mine[x.date] = { s: x.status, n: x.note || '' }; else delete mine[x.date];
+        S.savedAt[x.date] = Date.now();
         var p = S.pending[x.date];
         if (p && p.s === x.status && p.n === (x.note || '')) delete S.pending[x.date];   // 送信中に変えた日は残す
         delete S.failed[x.date];
       });
       S.lastSaved = new Date();
+      saveCache();
     }, function (e) {
       days.forEach(function (d) { S.failed[d.date] = true; });
       S.error = e.message;
@@ -172,33 +262,79 @@
   function start() {
     if (DEMO) show('demoBanner');
     if (!token) return fatal('URLが正しくありません。管理者から届いたURLをそのまま開いてください。');
-    api('bootstrap').then(function (r) {
-      S.me = r.me; S.staff = r.staff; S.roles = r.roles || {}; S.avail = r.availability || {}; S.period = r.period; S.venues = r.venues || [];
-      var t = todayJst().slice(0, 7);
-      var months = monthsOf(S.period);
-      S.month = months.indexOf(t) >= 0 ? t : months[0];
-      S.tab = S.me.isAdmin ? 'events' : 'mine';
-      hide('loading');
-      byId('who').textContent = S.me.isAdmin ? '管理者' : S.me.name + 'さん';
-      setupTabs();
-      setupMine();
-      setupAll();
-      setupRoles();
-      setupEvents();
-      renderAll();
-      if (S.tab === 'events') loadEvents(S.month);
-    }).catch(function (e) {
-      fatal(e.code === 'auth' ? 'このURLは使えません。管理者に新しいURLをもらってください。' : '読み込めませんでした：' + e.message + '（時間をおいて開き直してください）');
-    });
-
     window.addEventListener('beforeunload', function (ev) {
       if (pendingCount() || S.inflight) { ev.preventDefault(); ev.returnValue = ''; }
     });
     byId('retryBtn').addEventListener('click', function () { S.error = null; flush(); });
+    byId('staleRetry').addEventListener('click', function () { refreshBoot(); if (S.tab === 'events') loadEvents(S.month, true); });
+    document.addEventListener('focusout', function () {
+      setTimeout(function () { if (S.deferRender) renderSafe(); }, 0);
+    });
+
+    makeCacheKey().then(function (k) {
+      cacheKey = k;
+      var c = loadCache();
+      if (c) {
+        // 前回の内容をすぐ出す（管理者は予定も前回の分を出し、bootstrap と並行で取り直す）
+        applyBoot(c.boot);
+        S.bootAt = c.bootAt; S.fromCache = true;
+        Object.keys(c.events || {}).forEach(function (m) { S.events[m] = { status: 'cached', data: c.events[m].data, at: c.events[m].at }; });
+        initUI();
+        window.__micopsCacheShownAt = performance.now();   // 計測用
+      }
+      refreshBoot();
+    });
+  }
+
+  /** 画面の部品を一度だけ組み立てる（キャッシュ・最新のどちらが先に来ても1回） */
+  function initUI() {
+    if (S.uiReady) return;
+    S.uiReady = true;
+    var t = todayJst().slice(0, 7);
+    var months = monthsOf(S.period);
+    S.month = months.indexOf(t) >= 0 ? t : months[0];
+    S.tab = S.me.isAdmin ? 'events' : 'mine';
+    hide('loading');
+    byId('who').textContent = S.me.isAdmin ? '管理者' : S.me.name + 'さん';
+    setupTabs();
+    setupMine();
+    setupAll();
+    setupRoles();
+    setupEvents();
+    renderAll();
+    if (S.tab === 'events') loadEvents(S.month);
+  }
+
+  function refreshBoot() {
+    var t0 = Date.now();
+    S.refreshing = true;
+    renderAsOf();
+    return api('bootstrap').then(function (r) {
+      applyBoot(r, t0);
+      S.bootAt = Date.now(); S.fromCache = false; S.stale = false;
+      saveCache();
+      if (!S.uiReady) initUI();
+      else { if (!S.rolesDirty) fillRolesForm(); renderSafe(); }
+    }, function (e) {
+      if (e.code === 'auth') {
+        // URL が無効化・再発行された。前回の内容も消して、何も出さない
+        dropLocalCache();
+        S.dead = true;
+        ['tabs', 'tab-mine', 'tab-all', 'tab-events', 'tab-roles', 'staleBanner', 'errorBanner'].forEach(hide);
+        byId('asOf').textContent = '';
+        return fatal('このURLは使えません。管理者に新しいURLをもらってください。');
+      }
+      if (S.uiReady) { S.stale = true; return; }
+      fatal('読み込めませんでした：' + e.message + '（時間をおいて開き直してください）');
+    }).then(function () {
+      S.refreshing = false;
+      if (!S.dead) renderAsOf();
+    });
   }
 
   function fatal(msg) {
     hide('loading');
+    S.dead = S.dead || !S.uiReady;
     var el = byId('fatal');
     el.textContent = msg;
     el.hidden = false;
@@ -238,6 +374,15 @@
       b.addEventListener('click', function () { S.pen = b.dataset.pen; S.rangeStart = null; renderMine(); });
     });
     byId('rangeMode').addEventListener('change', function (e) { S.range = e.target.checked; S.rangeStart = null; renderMine(); });
+    byId('rangeCancel').addEventListener('click', function () { S.range = false; S.rangeStart = null; byId('rangeMode').checked = false; renderMine(); });
+    // 初回だけ使い方を出す。閉じたら二度と出さない（この端末で）
+    var helpSeen = false;
+    try { helpSeen = localStorage.getItem('micops_help_closed') === '1'; } catch (e) { helpSeen = false; }
+    byId('help').hidden = helpSeen;
+    byId('helpClose').addEventListener('click', function () {
+      byId('help').hidden = true;
+      try { localStorage.setItem('micops_help_closed', '1'); } catch (e) { /* 保存できなくても閉じる */ }
+    });
     byId('cal').addEventListener('click', function (e) {
       var cell = e.target.closest('.day');
       if (cell) onDayTap(cell.dataset.date);
@@ -298,6 +443,15 @@
     byId('hint').textContent = S.range
       ? (S.rangeStart ? md(S.rangeStart) + ' から。終わりの日をタップしてください' : '始まりの日をタップしてください')
       : '印を選んで日付をタップ。もう一度タップしても同じ印のままです（変えるときは印を選び直す）';
+    byId('rangeSteps').hidden = !S.range;
+    byId('rangeSteps').querySelectorAll('.step').forEach(function (el) {
+      el.classList.toggle('now', el.dataset.step === (S.rangeStart ? '2' : '1'));
+      el.classList.toggle('done', el.dataset.step === '1' && !!S.rangeStart);
+    });
+    var PEN_NAME = { '○': '行ける', '△': '条件付き', '×': '行けない' };
+    byId('penNow').innerHTML = S.pen
+      ? '<span class="mk ' + STATUS_CLASS[S.pen] + '">' + S.pen + '</span>（' + PEN_NAME[S.pen] + '）を入力中' + (S.range ? '・期間でまとめて' : '')
+      : '<span class="mk s-n">消</span>消す（未回答に戻す）を入力中' + (S.range ? '・期間でまとめて' : '');
 
     var cal = byId('cal');
     var days = daysOf(S.month);
@@ -364,12 +518,13 @@
   }
 
   function renderGrid() {
-    var days = daysOf(S.month).filter(function (d) { return !S.weekendOnly || isOff(d); });
+    var today = todayJst();
+    var days = daysOf(S.month).filter(function (d) { return !S.weekendOnly || isOff(d) || d === today; });
     var h = '<thead><tr><th class="corner">' + (+S.month.slice(5, 7)) + '月</th>';
     days.forEach(function (d) {
       var w = weekday(d);
       var c = (w === 0 || HOLIDAYS[d]) ? 'sun' : (w === 6 ? 'sat' : '');
-      h += '<th class="dh ' + c + (S.selectedDay === d ? ' sel' : '') + '"><button type="button" data-day="' + d + '">' +
+      h += '<th class="dh ' + c + (S.selectedDay === d ? ' sel' : '') + (d === today ? ' today' : '') + '"><button type="button" data-day="' + d + '">' +
         parts(d)[2] + '<small>' + WD[w] + '</small></button></th>';
     });
     h += '</tr></thead><tbody>';
@@ -378,7 +533,7 @@
       h += '<tr' + (self ? ' class="self"' : '') + '><th class="nm">' + esc(st.name) + '</th>';
       days.forEach(function (d) {
         var v = valueOf(st.staffId, d);
-        h += '<td class="' + STATUS_CLASS[v.s] + (S.selectedDay === d ? ' sel' : '') + '"' + (v.n ? ' title="' + esc(v.n) + '"' : '') + '>' +
+        h += '<td class="' + STATUS_CLASS[v.s] + (S.selectedDay === d ? ' sel' : '') + (d === today ? ' today' : '') + '"' + (v.n ? ' title="' + esc(v.n) + '"' : '') + '>' +
           esc(v.s) + (v.n ? '<i class="nd"></i>' : '') + '</td>';
       });
       h += '</tr>';
@@ -439,6 +594,44 @@
     var form = byId('rolesForm');
     if (S.me.isAdmin) return;
     form.hidden = false;
+    fillRolesForm();
+    form.addEventListener('change', function () {
+      S.rolesDirty = true;
+      toggleEscortNote();
+      setRolesMsg('', '');
+    });
+    byId('escortNote').addEventListener('input', function () { S.rolesDirty = true; });
+    toggleEscortNote();
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var roles = {};
+      ROLE_DEF.forEach(function (rd) {
+        var c = form.querySelector('input[name="' + rd.key + '"]:checked');
+        roles[rd.key] = c ? c.value : '';
+      });
+      roles.escort_note = roles.escort === '条件付き' ? byId('escortNote').value : '';
+      roles.venues = Array.prototype.map.call(form.querySelectorAll('input[name="venue"]:checked'), function (x) { return x.value; });
+      var btn = byId('rolesSave');
+      btn.disabled = true;
+      setRolesMsg('保存中…', 'busy');
+      api('saveRoles', { roles: roles }).then(function (r) {
+        S.roles[S.me.staffId] = r.roles;
+        S.rolesSavedAt = Date.now();
+        S.rolesDirty = false;
+        saveCache();
+        byId('escortNote').value = r.roles.escort_note || '';
+        setRolesMsg('✓ 保存しました', 'ok');
+        renderRolesTable();
+      }, function (err) {
+        setRolesMsg('⚠ 保存できませんでした：' + err.message, 'ng');
+      }).then(function () { btn.disabled = false; });
+    });
+  }
+
+  /** 役割の希望の欄を、保存済みの内容で埋める（変更中は呼ばない） */
+  function fillRolesForm() {
+    var form = byId('rolesForm');
+    if (S.me.isAdmin) return;
     var cur = S.roles[S.me.staffId] || {};
     ROLE_DEF.forEach(function (rd) {
       var box = form.querySelector('[data-role="' + rd.key + '"] .choices');
@@ -456,32 +649,7 @@
       return '<input type="checkbox" name="venue" id="' + id + '" value="' + esc(v) + '"' + (curVenues.indexOf(v) >= 0 ? ' checked' : '') + '>' +
         '<label for="' + id + '">' + esc(v) + '</label>';
     }).join('');
-    form.addEventListener('change', function () {
-      toggleEscortNote();
-      setRolesMsg('', '');
-    });
     toggleEscortNote();
-    form.addEventListener('submit', function (e) {
-      e.preventDefault();
-      var roles = {};
-      ROLE_DEF.forEach(function (rd) {
-        var c = form.querySelector('input[name="' + rd.key + '"]:checked');
-        roles[rd.key] = c ? c.value : '';
-      });
-      roles.escort_note = roles.escort === '条件付き' ? byId('escortNote').value : '';
-      roles.venues = Array.prototype.map.call(form.querySelectorAll('input[name="venue"]:checked'), function (x) { return x.value; });
-      var btn = byId('rolesSave');
-      btn.disabled = true;
-      setRolesMsg('保存中…', 'busy');
-      api('saveRoles', { roles: roles }).then(function (r) {
-        S.roles[S.me.staffId] = r.roles;
-        byId('escortNote').value = r.roles.escort_note || '';
-        setRolesMsg('✓ 保存しました', 'ok');
-        renderRolesTable();
-      }, function (err) {
-        setRolesMsg('⚠ 保存できませんでした：' + err.message, 'ng');
-      }).then(function () { btn.disabled = false; });
-    });
   }
 
   function toggleEscortNote() {
@@ -523,12 +691,13 @@
 
   function setupEvents() {
     byId('evReload').addEventListener('click', function () {
-      // 空き状況・役割も読み直す（担当の人が×に変えたかの警告は、これを元に出している）
-      api('bootstrap').then(function (r) {
-        S.staff = r.staff; S.roles = r.roles || {}; S.avail = r.availability || {}; S.venues = r.venues || S.venues;
-        renderAll();
-      }, function () { /* 予定の読み込み側で失敗を表示する */ });
-      loadEvents(S.month, true);
+      // 空き状況・役割も読み直す（担当の人が×に変えたかの警告は、これを元に出している）。
+      // 管理者はカレンダーも読み直す（サーバー側の10分キャッシュを使わない）
+      refreshBoot();
+      loadEvents(S.month, true, true);
+    });
+    byId('tab-events').addEventListener('change', function (e) {
+      if (e.target.dataset && e.target.dataset.keep) S.selKeep[e.target.dataset.keep] = e.target.value;
     });
     byId('tab-events').addEventListener('click', function (e) {
       var b = e.target.closest('[data-act]');
@@ -555,18 +724,19 @@
     });
   }
 
-  function loadEvents(month, force) {
+  function loadEvents(month, force, fresh) {
     var cur = S.events[month];
     if (cur && (cur.status === 'loading' || (cur.status === 'ok' && !force))) return;
     S.evMsg = null;
-    S.events[month] = { status: 'loading', data: cur && cur.data };
+    S.events[month] = { status: 'loading', data: cur && cur.data, at: cur && cur.at };
     renderEvents();
-    api('events', { month: month }).then(function (r) {
-      S.events[month] = { status: 'ok', data: r };
+    api('events', fresh && S.me.isAdmin ? { month: month, fresh: true } : { month: month }).then(function (r) {
+      S.events[month] = { status: 'ok', data: r, at: Date.now() };
+      saveCache();
     }, function (e) {
       var msg = e.code === 'bad_request' && /不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です。更新後に「最新にする」を押してください' : e.message;
-      S.events[month] = { status: 'error', error: msg, data: cur && cur.data };
-    }).then(renderEvents);
+      S.events[month] = { status: 'error', error: msg, data: cur && cur.data, at: cur && cur.at };
+    }).then(function () { if (S.tab === 'events') renderSafe(); else renderEvents(); });
   }
 
   /** 管理者の操作。成功したらサーバーが返した月の予定で描き直す。then は続けて行う操作 */
@@ -576,10 +746,13 @@
     S.evMsg = { kind: 'busy', text: '保存中…' };
     renderEvents();
     api(action, Object.assign({ month: month }, payload)).then(function (r) {
-      S.events[month] = { status: 'ok', data: r };
+      S.events[month] = { status: 'ok', data: r, at: Date.now() };
       var next = then && then();
-      if (next) return api(next.action, Object.assign({ month: month }, next.payload)).then(function (r2) { S.events[month] = { status: 'ok', data: r2 }; });
+      if (next) return api(next.action, Object.assign({ month: month }, next.payload)).then(function (r2) { S.events[month] = { status: 'ok', data: r2, at: Date.now() }; });
     }).then(function () {
+      saveCache();
+      // 保存した予定のプルダウンは、保存後の内容で出し直す
+      Object.keys(S.selKeep).forEach(function (k) { if (k.indexOf(':' + payload.eventKey) >= 0) delete S.selKeep[k]; });
       S.evMsg = { kind: 'ok', text: '✓ 保存しました' };
     }, function (e) {
       S.evMsg = { kind: 'ng', text: '⚠ 保存できませんでした：' + e.message };
@@ -624,8 +797,12 @@
     var st = S.events[S.month];
     var status = byId('evStatus');
     if (S.evMsg) { status.textContent = S.evMsg.text; status.className = 'ev-status ' + S.evMsg.kind; }
-    else if (st && st.status === 'loading') { status.textContent = '読み込み中…'; status.className = 'ev-status busy'; }
-    else if (st && st.status === 'error') { status.textContent = '⚠ 読み込めませんでした：' + st.error; status.className = 'ev-status ng'; }
+    else if (st && st.status === 'loading') { status.textContent = st.data ? clock(st.at) + '時点の内容・最新を確認中…' : '読み込み中…'; status.className = 'ev-status busy'; }
+    else if (st && st.status === 'cached') { status.textContent = clock(st.at) + '時点の内容'; status.className = 'ev-status busy'; }
+    else if (st && st.status === 'error') {
+      status.textContent = st.data ? '⚠ 最新を取得できませんでした。前回開いたときの内容です（' + clock(st.at) + '時点）' : '⚠ 読み込めませんでした：' + st.error;
+      status.className = 'ev-status ng';
+    }
     else { status.textContent = ''; status.className = 'ev-status'; }
     var data = st && st.data;
     if (!data || data.month !== S.month) { byId('evList').innerHTML = ''; byId('evOrphans').innerHTML = ''; return; }
@@ -644,6 +821,11 @@
 
     if (!data.events.length) { byId('evList').innerHTML = '<p class="muted">この月の予定はありません。</p>'; return; }
     byId('evList').innerHTML = data.events.map(renderEventCard).join('');
+    // 選んだだけでまだ保存していないプルダウンは、描き直しても選んだ値のままにする
+    byId('evList').querySelectorAll('select[data-keep]').forEach(function (sel) {
+      var v = S.selKeep[sel.dataset.keep];
+      if (v != null && Array.prototype.some.call(sel.options, function (o) { return o.value === v; })) sel.value = v;
+    });
   }
 
   function renderEventCard(ev) {
@@ -711,9 +893,9 @@
 
     // 種類・会場の手直し（アプリ側だけに保存。カレンダーには書かない）
     h += '<div class="ev-meta"><h4>種類・会場を直す</h4>' +
-      '<label>種類 <select name="type"><option value="">自動（' + esc(ev.typeAuto) + '）</option>' +
+      '<label>種類 <select name="type" data-keep="type:' + ev.key + '"><option value="">自動（' + esc(ev.typeAuto) + '）</option>' +
       EVENT_TYPES.map(function (t) { return '<option' + (ev.typeFixed && ev.type === t ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></label>' +
-      '<label>会場 <select name="venue"><option value="">自動（' + esc(ev.venueAuto || '推定なし') + '）</option>' +
+      '<label>会場 <select name="venue" data-keep="venue:' + ev.key + '"><option value="">自動（' + esc(ev.venueAuto || '推定なし') + '）</option>' +
       S.venues.map(function (v) { return '<option' + (ev.venueFixed && ev.venue === v ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join('') +
       '<option value="' + VENUE_NONE + '"' + (ev.venueFixed && !ev.venue ? ' selected' : '') + '>会場で絞らない</option></select></label>' +
       '<button type="button" class="mini" data-act="meta" data-key="' + ev.key + '"' + (S.evBusy ? ' disabled' : '') + '>直す</button></div>';
@@ -731,7 +913,7 @@
       return '<option value="' + esc(st.staffId) + '">' + esc(st.name) + '（' + esc(notes.join('・')) + '）</option>';
     });
     if (!opts.length) return '';
-    return '<div class="pick"><label>全員から選ぶ <select aria-label="' + ROLE_LABEL[role] + 'の担当を全員から選ぶ"><option value="">選んでください</option>' + opts.join('') + '</select></label>' +
+    return '<div class="pick"><label>全員から選ぶ <select data-keep="pick:' + ev.key + ':' + role + '" aria-label="' + ROLE_LABEL[role] + 'の担当を全員から選ぶ"><option value="">選んでください</option>' + opts.join('') + '</select></label>' +
       '<button type="button" class="mini" data-act="assign-pick" data-key="' + ev.key + '" data-role="' + role + '"' + (S.evBusy ? ' disabled' : '') + '>担当にする</button>' +
       '<small class="pick-hint">電話で頼んだ人など、アプリ未入力の人もここから選べます</small></div>';
   }
@@ -775,7 +957,7 @@
   }
 
   function renderAll() {
-    if (!S.me) return;
+    if (!S.me || !S.uiReady || S.dead) return;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === S.tab); });
     ['mine', 'all', 'events', 'roles'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
     renderMonthLabels();
@@ -784,6 +966,7 @@
     renderEvents();
     renderRolesTable();
     renderSaveState();
+    renderAsOf();
   }
 
   // ================================================================ 小物
@@ -797,5 +980,14 @@
     });
   }
 
-  start();
+  // デモ（apiUrl が空）のときだけ demo.js を読む。本番では読み込まない
+  if (DEMO && !window.MicDemo) {
+    var ds = document.createElement('script');
+    ds.src = 'demo.js';
+    ds.onload = start;
+    ds.onerror = function () { fatal('デモ用のファイルを読めませんでした'); };
+    document.head.appendChild(ds);
+  } else {
+    start();
+  }
 })();

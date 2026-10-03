@@ -15,10 +15,17 @@
     <h1>MIC スタッフ予定</h1>
     <span id="who" class="who"></span>
   </div>
-  <div id="saveState" class="save-state" role="status" aria-live="polite"></div>
+  <div class="top-sub">
+    <div id="saveState" class="save-state" role="status" aria-live="polite"></div>
+    <span id="asOf" class="as-of"></span>
+  </div>
 </header>
 
 <div id="demoBanner" class="banner demo" hidden>デモ表示です。名前は架空で、保存はこの端末の中だけです。</div>
+<div id="staleBanner" class="banner stale" hidden role="status">
+  <span id="staleText"></span>
+  <button id="staleRetry" type="button">もう一度読み込む</button>
+</div>
 <div id="errorBanner" class="banner error" hidden role="alert">
   <span id="errorText"></span>
   <button id="retryBtn" type="button">もう一度保存</button>
@@ -37,6 +44,15 @@
 
   <!-- 自分の予定 -->
   <section id="tab-mine" class="panel" hidden>
+    <div id="help" class="help" hidden>
+      <b>使い方</b>
+      <ol>
+        <li><span class="num">①</span>印（○△×）を選ぶ</li>
+        <li><span class="num">②</span>日付をタップ</li>
+        <li><span class="num">③</span>自動で保存されます</li>
+      </ol>
+      <button id="helpClose" type="button">わかった（閉じる）</button>
+    </div>
     <div class="month-nav">
       <button type="button" class="prev" aria-label="前の月">‹</button>
       <span class="month-label"></span>
@@ -50,7 +66,14 @@
       <button type="button" class="pen" data-pen="" role="radio"><b>消</b>未回答</button>
     </div>
     <label class="range-toggle"><input type="checkbox" id="rangeMode"> 期間でまとめて塗る</label>
+    <div id="rangeSteps" class="range-steps" hidden>
+      <span class="step" data-step="1">①開始日をタップ</span>
+      <span class="arrow" aria-hidden="true">→</span>
+      <span class="step" data-step="2">②終了日をタップ</span>
+      <button id="rangeCancel" type="button">やめる</button>
+    </div>
     <p id="hint" class="hint"></p>
+    <div id="penNow" class="pen-now" aria-live="polite"></div>
 
     <div class="cal-head"><span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span></div>
     <div id="cal" class="cal"></div>
@@ -134,7 +157,6 @@
 </main>
 
 <script src="config.js"></script>
-<script src="demo.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
