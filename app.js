@@ -303,6 +303,7 @@
     setupEvents();
     setupStaffAdmin();
     setupAi();
+    setupCalSync();
     renderAll();
     if (S.tab === 'events') loadEvents(S.month);
   }
@@ -714,6 +715,120 @@
   var EVENT_TYPES = ['練習', '合宿', '大会', '一般レッスン', '未分類'];
   var VENUE_NONE = 'なし';
 
+  // ================================================================ カレンダーへの反映・Deacon の指導日（管理者だけ）
+  //
+  // ★ 反映は「カレンダーに反映」ボタンだけ（担当の保存では反映しない）。担当などを変えたら「未反映の変更あり」を出す。
+  // ★ サーバーは1回に40件まで直し、残りがあれば more:true を返すので、終わるまで続けて呼ぶ。
+
+  var CAL_SYNC_TIMEOUT_MS = 300000;
+
+  function setupCalSync() {
+    if (!S.me.isAdmin) return;
+    S.cal = null;
+    byId('calBar').hidden = false;
+    byId('deaconBox').hidden = false;
+    byId('dcVenue').innerHTML = '<option value="">会場（未定）</option>' + S.venues.map(function (v) { return '<option>' + esc(v) + '</option>'; }).join('');
+    var months = monthsOf(S.period);
+    byId('dcDate').min = months[0] + '-01';
+    byId('dcDate').max = months[months.length - 1] + '-31';
+    byId('calSyncBtn').addEventListener('click', runCalSync);
+    byId('dcAdd').addEventListener('click', function () {
+      deaconOp('deaconSave', { date: byId('dcDate').value, start: byId('dcStart').value, end: byId('dcEnd').value, venue: byId('dcVenue').value }, function () {
+        byId('dcDate').value = ''; byId('dcStart').value = ''; byId('dcEnd').value = '';
+      });
+    });
+    byId('deaconList').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-dc]');
+      if (!b || S.dcBusy) return;
+      if (b.dataset.dc === 'delete' && !confirm('この指導日を消しますか？（付けた担当も外れます）')) return;
+      if (b.dataset.dc === 'delete') deaconOp('deaconDelete', { id: b.dataset.id });
+      else deaconOp('deaconConfirm', { id: b.dataset.id, confirmed: b.dataset.dc === 'confirm' });
+    });
+  }
+
+  function loadCalStatus() {
+    if (!S.me.isAdmin) return;
+    api('calStatus').then(function (r) { S.cal = r; }, function (e) {
+      S.cal = { error: /不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message };
+    }).then(renderCalBar);
+    api('deaconList').then(function (r) { S.deacon = r.items; renderDeacon(); }, function () {});
+  }
+
+  function stampLabel(s) {
+    return s ? (+s.slice(5, 7)) + '/' + (+s.slice(8, 10)) + ' ' + s.slice(11, 16) : '';
+  }
+
+  function renderCalBar() {
+    if (!S.me.isAdmin) return;
+    var c = S.cal || {};
+    var info = byId('calInfo');
+    byId('calSyncBtn').disabled = !!S.calBusy || !c.configured;
+    byId('calDirty').hidden = !c.dirty || !!S.calBusy;
+    if (S.calMsg) { info.textContent = S.calMsg.text; info.className = 'ev-status ' + S.calMsg.kind; return; }
+    info.className = 'ev-status';
+    if (c.error) { info.textContent = '⚠ ' + c.error; info.className = 'ev-status ng'; }
+    else if (!S.cal) info.textContent = '';
+    else if (!c.configured) info.textContent = '反映先のカレンダー「MIC 予定（アプリ）」がまだありません（エディタで setupAppCalendar を実行）';
+    else info.textContent = '「' + c.calendarName + '」へ反映。' + (c.syncedAt ? '最終反映：' + stampLabel(c.syncedAt) : 'まだ反映していません');
+  }
+
+  function runCalSync() {
+    if (S.calBusy) return;
+    S.calBusy = true;
+    var sum = { created: 0, updated: 0, deleted: 0, failed: 0 };
+    var progress = function () { return '作成' + sum.created + '・更新' + sum.updated + '・削除' + sum.deleted + (sum.failed ? '・失敗' + sum.failed : ''); };
+    S.calMsg = { kind: 'busy', text: '反映中…' };
+    renderCalBar();
+    var step = function () {
+      return api('calSync', {}, CAL_SYNC_TIMEOUT_MS).then(function (r) {
+        Object.keys(sum).forEach(function (k) { sum[k] += r.result[k] || 0; });
+        S.cal = Object.assign({}, S.cal, { syncedAt: r.syncedAt || (S.cal && S.cal.syncedAt), dirty: r.dirty });
+        if (r.more) { S.calMsg = { kind: 'busy', text: '反映中…（' + progress() + '）' }; renderCalBar(); return step(); }
+      });
+    };
+    step().then(function () {
+      S.calMsg = sum.failed
+        ? { kind: 'ng', text: '⚠ 一部反映できませんでした（' + progress() + '）。もう一度押してください' }
+        : { kind: 'ok', text: '✓ 反映しました（' + progress() + '）最終反映：' + stampLabel(S.cal.syncedAt) };
+    }, function (e) {
+      S.calMsg = { kind: 'ng', text: '⚠ 反映できませんでした：' + e.message };
+    }).then(function () { S.calBusy = false; renderCalBar(); });
+  }
+
+  function deaconOp(action, payload, done) {
+    S.dcBusy = true;
+    byId('dcMsg').textContent = '保存中…'; byId('dcMsg').className = 'ev-status busy';
+    renderDeacon();
+    api(action, payload).then(function (r) {
+      S.deacon = r.items;
+      byId('dcMsg').textContent = '✓ 保存しました'; byId('dcMsg').className = 'ev-status ok';
+      if (done) done();
+      if (S.cal) S.cal.dirty = true;
+      S.calMsg = null;
+      renderCalBar();
+      loadEvents(S.month, true);   // 予定の一覧にも出す
+    }, function (e) {
+      byId('dcMsg').textContent = '⚠ できませんでした：' + e.message; byId('dcMsg').className = 'ev-status ng';
+    }).then(function () { S.dcBusy = false; renderDeacon(); });
+  }
+
+  function renderDeacon() {
+    if (!S.me.isAdmin) return;
+    var list = S.deacon || [];
+    byId('deaconCount').textContent = list.length ? '（' + list.length + '件・未確定' + list.filter(function (x) { return !x.confirmed; }).length + '）' : '';
+    byId('dcAdd').disabled = !!S.dcBusy;
+    byId('deaconList').innerHTML = list.length ? list.map(function (x) {
+      var dis = S.dcBusy ? ' disabled' : '';
+      return '<li><span class="dc-when">' + md(x.date) + '（' + WD[weekday(x.date)] + '）' + (x.start ? ' ' + esc(x.start) + '–' + esc(x.end) : ' 終日') + '</span>' +
+        (x.venue ? '<span class="badge venue">' + esc(x.venue) + '</span>' : '') +
+        (x.confirmed ? '<span class="badge type">確定</span>' : '<span class="badge tent">仮</span>') +
+        '<span class="dc-acts">' + (x.confirmed
+          ? '<button type="button" class="mini ghost" data-dc="unconfirm" data-id="' + esc(x.id) + '"' + dis + '>仮に戻す</button>'
+          : '<button type="button" class="mini" data-dc="confirm" data-id="' + esc(x.id) + '"' + dis + '>確定にする</button>') +
+        '<button type="button" class="mini ghost" data-dc="delete" data-id="' + esc(x.id) + '"' + dis + '>削除</button></span></li>';
+    }).join('') : '<li class="muted">登録はまだありません</li>';
+  }
+
   function setupEvents() {
     byId('evReload').addEventListener('click', function () {
       // 空き状況・役割も読み直す（担当の人が×に変えたかの警告は、これを元に出している）。
@@ -750,6 +865,7 @@
   }
 
   function loadEvents(month, force, fresh) {
+    if (S.me.isAdmin && (!S.cal || force)) loadCalStatus();
     var cur = S.events[month];
     if (cur && (cur.status === 'loading' || (cur.status === 'ok' && !force))) return;
     S.evMsg = null;
@@ -779,6 +895,7 @@
       // 保存した予定のプルダウンは、保存後の内容で出し直す
       Object.keys(S.selKeep).forEach(function (k) { if (k.indexOf(':' + payload.eventKey) >= 0) delete S.selKeep[k]; });
       S.evMsg = { kind: 'ok', text: '✓ 保存しました' };
+      if (S.cal && S.cal.configured) { S.cal.dirty = true; S.calMsg = null; renderCalBar(); }
     }, function (e) {
       S.evMsg = { kind: 'ng', text: '⚠ 保存できませんでした：' + e.message };
     }).then(function () { S.evBusy = false; renderEvents(); });
@@ -858,7 +975,8 @@
     var badges = '<span class="badge type">' + esc(ev.type) + (ev.typeFixed ? '✎' : '') + '</span>' +
       (ev.venue ? '<span class="badge venue">' + esc(ev.venue) + (ev.venueFixed ? '✎' : '') + '</span>' : '<span class="badge novenue">会場：' + (ev.venueFixed ? '絞らない✎' : '推定なし') + '</span>') +
       (ev.tentative ? '<span class="badge tent">仮</span>' : '') +
-      (ev.cal === 'レッスン' ? '<span class="badge calsrc">MICレッスン</span>' : '');
+      (ev.cal === 'レッスン' ? '<span class="badge calsrc">MICレッスン</span>' : '') +
+      (ev.cal === 'Deacon' ? '<span class="badge calsrc">アプリで登録</span>' : '');
     var assigned = ev.assigned.length ? ev.assigned.map(function (a) {
       var c = availOn(a.staffId, ev.dates);
       var warn = c.x ? ' <span class="warn">⚠×の日あり</span>' : (c.n ? ' <span class="warn">⚠未回答の日あり</span>' : '');

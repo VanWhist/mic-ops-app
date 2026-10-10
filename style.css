@@ -294,3 +294,19 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .ai-sug-meta { font-size: 12px; color: var(--muted); }
 .ai-sug-why { font-size: 13px; color: var(--muted); }
 .ai-sug-list .mini { margin-top: 4px; }
+
+/* カレンダーへの反映・Deacon 指導日（管理者だけ） */
+.cal-bar { border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 8px 10px; margin: 6px 0 10px; }
+.cal-bar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cal-bar .primary { min-height: 44px; }
+.cal-bar .primary:disabled { opacity: .5; }
+.cal-bar .ev-status { margin: 6px 0 0; }
+.deacon { border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }
+.deacon summary { font-weight: 700; min-height: 32px; cursor: pointer; }
+.deacon-form { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: flex-end; font-size: 14px; }
+.deacon-form label { display: flex; flex-direction: column; gap: 2px; }
+.deacon-form input, .deacon-form select { font-size: 16px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; }
+.deacon-form .primary { min-height: 44px; }
+.deacon-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.deacon-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding: 6px 0; font-size: 14px; }
+.dc-acts { margin-left: auto; display: flex; gap: 6px; }
