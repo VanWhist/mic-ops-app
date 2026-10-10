@@ -712,7 +712,7 @@
   var ROLE_LABEL = { coaching: 'MICコーチング', lesson: '一般レッスン', escort: '大会引率' };
   var ROLE_SHORT = { coaching: 'コーチ', lesson: 'レッスン', escort: '引率' };
   var ROLE_TOP = { coaching: ['積極的にやりたい', '可能'], lesson: ['積極的にやりたい', '可能'], escort: ['可能', '条件付き'] };
-  var EVENT_TYPES = ['練習', '合宿', '大会', '一般レッスン', '未分類'];
+  var EVENT_TYPES = ['練習', '合宿', '大会', '一般レッスン', '不在', '未分類'];
   var VENUE_NONE = 'なし';
 
   // ================================================================ カレンダーへの反映・Deacon の指導日（管理者だけ）
@@ -838,6 +838,7 @@
     });
     byId('tab-events').addEventListener('change', function (e) {
       if (e.target.dataset && e.target.dataset.keep) S.selKeep[e.target.dataset.keep] = e.target.value;
+      if (e.target.name === 'type') syncAbsentPick(e.target);
     });
     byId('tab-events').addEventListener('click', function (e) {
       var b = e.target.closest('[data-act]');
@@ -859,9 +860,20 @@
         });
       } else if (act === 'meta') {
         var box = b.closest('.ev-meta');
-        adminOp('setEventMeta', { eventKey: key, type: box.querySelector('select[name="type"]').value, venue: box.querySelector('select[name="venue"]').value });
+        var tsel = box.querySelector('select[name="type"]');
+        var type = tsel.value;
+        var people = Array.prototype.map.call(box.querySelectorAll('input[name="people"]:checked'), function (x) { return x.value; });
+        if (people.length && !type && /自動（不在）/.test(tsel.options[0].textContent)) type = '不在';   // 自動で不在の予定に人を選んだ
+        if (people.length && type !== '不在') { S.evMsg = { kind: 'ng', text: '不在の人を選ぶときは、種類を「不在」にしてください' }; renderEvents(); return; }
+        adminOp('setEventMeta', { eventKey: key, type: type, venue: box.querySelector('select[name="venue"]').value, people: type === '不在' ? people : [] });
       }
     });
+  }
+
+  /** 種類を選ぶと、不在の人の欄を出し入れする（「自動」で自動が不在のときも出す） */
+  function syncAbsentPick(sel) {
+    var auto = /自動（不在）/.test(sel.options[0].textContent);
+    sel.closest('.ev-meta').querySelector('.absent-pick').hidden = !(sel.value === '不在' || (!sel.value && auto));
   }
 
   function loadEvents(month, force, fresh) {
@@ -967,6 +979,7 @@
     byId('evList').querySelectorAll('select[data-keep]').forEach(function (sel) {
       var v = S.selKeep[sel.dataset.keep];
       if (v != null && Array.prototype.some.call(sel.options, function (o) { return o.value === v; })) sel.value = v;
+      if (sel.name === 'type') syncAbsentPick(sel);
     });
   }
 
@@ -977,6 +990,7 @@
       (ev.tentative ? '<span class="badge tent">仮</span>' : '') +
       (ev.cal === 'レッスン' ? '<span class="badge calsrc">MICレッスン</span>' : '') +
       (ev.cal === 'Deacon' ? '<span class="badge calsrc">アプリで登録</span>' : '');
+    var absent = ev.type === '不在';   // スタッフの不在期間：担当は付けず「不在：誰」を出す
     var assigned = ev.assigned.length ? ev.assigned.map(function (a) {
       var c = availOn(a.staffId, ev.dates);
       var warn = c.x ? ' <span class="warn">⚠×の日あり</span>' : (c.n ? ' <span class="warn">⚠未回答の日あり</span>' : '');
@@ -987,10 +1001,14 @@
       '<h3 class="ev-title">' + esc(ev.title) + '</h3>' +
       (ev.location ? '<div class="ev-loc">' + esc(ev.location) + '</div>' : '') +
       '<div class="badges">' + badges + '</div>' +
-      '<div class="ev-assigned">担当：' + assigned + '</div>';
+      (absent
+        ? '<div class="ev-assigned ev-absent">不在：' + (ev.absentees && ev.absentees.length ? ev.absentees.map(function (id) { return '<b>' + esc(nameOf(id)) + '</b>'; }).join('・') + (ev.absentFixed ? '✎' : '') : '<span class="muted">（未定）</span>') + '</div>'
+        : '<div class="ev-assigned">担当：' + assigned + '</div>');
     if (S.me.isAdmin) {
       h += '<button type="button" class="ev-open' + (open ? ' is-open' : '') + '" data-act="open" data-key="' + ev.key + '">' +
-        (open ? '閉じる ▴' : '<span class="ev-open-icon" aria-hidden="true">＋</span>担当を決める<small>空いている人を見る</small><span class="ev-open-arrow" aria-hidden="true">▾</span>') + '</button>';
+        (open ? '閉じる ▴' : absent
+          ? '<span class="ev-open-icon" aria-hidden="true">✎</span>種類・不在の人を直す<span class="ev-open-arrow" aria-hidden="true">▾</span>'
+          : '<span class="ev-open-icon" aria-hidden="true">＋</span>担当を決める<small>空いている人を見る</small><span class="ev-open-arrow" aria-hidden="true">▾</span>') + '</button>';
       if (open) h += renderEventDetail(ev);
     }
     return h + '</article>';
@@ -1029,7 +1047,7 @@
       h += pickRow(ev, role, mine);
       h += '</section>';
     });
-    var busy = S.staff.filter(function (st) { return !availOn(st.staffId, ev.dates).free; }).map(function (st) {
+    var busy = ev.type === '不在' ? [] : S.staff.filter(function (st) { return !availOn(st.staffId, ev.dates).free; }).map(function (st) {
       return esc(st.name) + '<small>（' + availOn(st.staffId, ev.dates).label + '）</small>';
     });
     if (busy.length) h += '<p class="rest">行けない・未回答：' + busy.join('、') + '</p>';
@@ -1041,6 +1059,12 @@
       '<label>会場 <select name="venue" data-keep="venue:' + ev.key + '"><option value="">自動（' + esc(ev.venueAuto || '推定なし') + '）</option>' +
       S.venues.map(function (v) { return '<option' + (ev.venueFixed && ev.venue === v ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join('') +
       '<option value="' + VENUE_NONE + '"' + (ev.venueFixed && !ev.venue ? ' selected' : '') + '>会場で絞らない</option></select></label>' +
+      // 不在の人（種類が不在のときだけ使う）
+      '<fieldset class="absent-pick"' + (ev.type === '不在' ? '' : ' hidden') + '><legend>不在の人（種類＝不在のとき）</legend>' +
+      S.staff.map(function (st) {
+        var on = (ev.absentees || []).indexOf(st.staffId) >= 0;
+        return '<label><input type="checkbox" name="people" value="' + esc(st.staffId) + '"' + (on ? ' checked' : '') + '> ' + esc(st.name) + '</label>';
+      }).join('') + '</fieldset>' +
       '<button type="button" class="mini" data-act="meta" data-key="' + ev.key + '"' + (S.evBusy ? ' disabled' : '') + '>直す</button></div>';
     return h + '</div>';
   }
