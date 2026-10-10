@@ -125,6 +125,8 @@
       return respond({ ok: true, staffId: req.staffId, token: fake });
     }
     if (req.action === 'aiAsk') return respond({ ok: false, error: 'ai_no_key', message: 'デモではAIは使えません' });
+    if (req.action === 'calStatus') return respond({ ok: true, configured: false, calendarName: 'MIC 予定（アプリ）', syncedAt: '', dirty: false });
+    if (req.action === 'deaconList') return respond({ ok: true, items: [] });
     if (req.action === 'bootstrap') {
       return respond({ ok: true, me: me, staff: NAMES, roles: db.roles, availability: db.availability, period: PERIOD, venues: VENUES });
     }

@@ -122,6 +122,27 @@
       <button type="button" id="evReload" class="link-btn">最新にする</button>
     </div>
     <p class="hint">予定は「MICスケジュール」「MICレッスン」から読んでいます（読むだけ）。</p>
+    <!-- 管理者だけ：アプリ専用カレンダー「MIC 予定（アプリ）」への反映と、Deacon の指導日 -->
+    <div id="calBar" class="cal-bar" hidden>
+      <div class="cal-bar-row">
+        <button id="calSyncBtn" type="button" class="primary">カレンダーに反映</button>
+        <span id="calDirty" class="badge tent" hidden>未反映の変更あり</span>
+      </div>
+      <p id="calInfo" class="ev-status" role="status" aria-live="polite"></p>
+    </div>
+    <details id="deaconBox" class="deacon" hidden>
+      <summary>Deacon 指導日 <span id="deaconCount" class="muted"></span></summary>
+      <p class="hint">登録すると予定に入り、カレンダーには「【仮】」付きで反映します。「確定にする」で「練習会」の括りになります。</p>
+      <div class="deacon-form">
+        <label>日付 <input id="dcDate" type="date"></label>
+        <label>開始 <input id="dcStart" type="time" step="300"></label>
+        <label>終了 <input id="dcEnd" type="time" step="300"></label>
+        <label>会場 <select id="dcVenue"></select></label>
+        <button id="dcAdd" type="button" class="primary">追加</button>
+      </div>
+      <p id="dcMsg" class="ev-status" role="status" aria-live="polite"></p>
+      <ul id="deaconList" class="deacon-list"></ul>
+    </details>
     <div id="evOrphans"></div>
     <div id="evList"></div>
   </section>
