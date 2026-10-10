@@ -259,3 +259,15 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 
 .note-edit { border: 1px solid var(--line); background: #fff; color: var(--accent); border-radius: 6px; padding: 4px 10px; min-height: 36px; font-size: 13px; margin-left: 4px; }
 .note-list li { margin: 4px 0; }
+
+/* AIに質問（管理者だけ） */
+.ai-examples { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.chip { border: 1px solid var(--accent); color: var(--accent); background: var(--card); border-radius: 999px; padding: 6px 12px; min-height: 40px; font-size: 14px; }
+.chip:disabled { opacity: .5; }
+.ai-log { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.ai-q { align-self: flex-end; max-width: 85%; background: var(--accent); color: #fff; border-radius: 12px 12px 2px 12px; padding: 8px 12px; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-a { align-self: flex-start; max-width: 92%; background: var(--card); border: 1px solid var(--line); border-radius: 12px 12px 12px 2px; padding: 8px 12px; font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-a.busy { color: var(--muted); }
+.ai-a.ng { color: var(--ng); border-color: var(--ng); }
+.ai-form button { min-height: 44px; }
+.ai-form button:disabled { opacity: .5; }

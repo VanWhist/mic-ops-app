@@ -124,6 +124,7 @@
       if (req.action === 'addStaff') return respond({ ok: true, staffId: 'S013', name: req.name, token: fake });
       return respond({ ok: true, staffId: req.staffId, token: fake });
     }
+    if (req.action === 'aiAsk') return respond({ ok: false, error: 'ai_no_key', message: 'デモではAIは使えません' });
     if (req.action === 'bootstrap') {
       return respond({ ok: true, me: me, staff: NAMES, roles: db.roles, availability: db.availability, period: PERIOD, venues: VENUES });
     }

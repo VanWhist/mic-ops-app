@@ -129,11 +129,11 @@
 
   // ================================================================ 通信
 
-  function api(action, body) {
+  function api(action, body, timeoutMs) {
     var payload = Object.assign({ action: action, token: token }, body || {});
     if (DEMO) return window.MicDemo.call(payload);
     var ctrl = new AbortController();
-    var timer = setTimeout(function () { ctrl.abort(); }, 30000);
+    var timer = setTimeout(function () { ctrl.abort(); }, timeoutMs || 30000);
     return fetch(CFG.apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },   // プリフライトを起こさない
@@ -302,6 +302,7 @@
     setupRoles();
     setupEvents();
     setupStaffAdmin();
+    setupAi();
     renderAll();
     if (S.tab === 'events') loadEvents(S.month);
   }
@@ -321,7 +322,7 @@
         // URL が無効化・再発行された。前回の内容も消して、何も出さない
         dropLocalCache();
         S.dead = true;
-        ['tabs', 'tab-mine', 'tab-all', 'tab-events', 'tab-roles', 'tab-staff', 'staleBanner', 'errorBanner'].forEach(hide);
+        ['tabs', 'tab-mine', 'tab-all', 'tab-events', 'tab-roles', 'tab-staff', 'tab-ai', 'staleBanner', 'errorBanner'].forEach(hide);
         byId('asOf').textContent = '';
         return fatal('このURLは使えません。管理者に新しいURLをもらってください。');
       }
@@ -348,7 +349,7 @@
     nav.hidden = false;
     nav.querySelectorAll('.tab').forEach(function (b) {
       if (S.me.isAdmin && b.dataset.tab === 'mine') b.hidden = true;
-      if (b.dataset.tab === 'staff') b.hidden = !S.me.isAdmin;
+      if (b.dataset.tab === 'staff' || b.dataset.tab === 'ai') b.hidden = !S.me.isAdmin;
       b.addEventListener('click', function () {
         S.tab = b.dataset.tab;
         renderAll();
@@ -1077,6 +1078,68 @@
     byId('reissueAdminBtn').disabled = !!S.stBusy;
   }
 
+  // ================================================================ AIに質問（管理者だけ）
+  //
+  // ★ 会話はこの画面の中だけに持つ（端末に保存しない）。閉じると消える。
+  // ★ 続きの質問のために、直前の3往復だけを文字でサーバーへ渡す。
+
+  var AI_TIMEOUT_MS = 120000;   // Claude を何回か呼ぶので、ふつうの操作より長く待つ
+
+  function setupAi() {
+    if (!S.me.isAdmin) return;
+    S.ai = [];   // { q, a, error, busy }
+    byId('aiForm').addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      askAi(byId('aiInput').value);
+    });
+    byId('aiExamples').querySelectorAll('.chip').forEach(function (b) {
+      b.addEventListener('click', function () { askAi(b.textContent); });
+    });
+    byId('aiClear').addEventListener('click', function () {
+      if (S.aiBusy) return;
+      S.ai = [];
+      renderAi();
+    });
+    renderAi();
+  }
+
+  function askAi(text) {
+    var q = String(text || '').trim();
+    if (!q || S.aiBusy) return;
+    var history = S.ai.filter(function (t) { return t.a && !t.error; }).slice(-3).map(function (t) { return { q: t.q, a: t.a }; });
+    var turn = { q: q, a: '', busy: true };
+    S.ai.push(turn);
+    S.aiBusy = true;
+    byId('aiInput').value = '';
+    renderAi();
+    api('aiAsk', { question: q, history: history }, AI_TIMEOUT_MS).then(function (r) {
+      turn.a = r.answer;
+      S.aiUsage = r.used + ' / ' + r.limit + '回';
+    }, function (e) {
+      turn.error = true;
+      turn.a = e.message;
+    }).then(function () {
+      turn.busy = false;
+      S.aiBusy = false;
+      renderAi();
+    });
+  }
+
+  function renderAi() {
+    if (!S.me || !S.me.isAdmin || !S.ai) return;
+    byId('aiLog').innerHTML = S.ai.map(function (t) {
+      return '<div class="ai-q">' + esc(t.q) + '</div>' +
+        (t.busy ? '<div class="ai-a busy">考え中…（10〜30秒ほどかかります）</div>'
+          : '<div class="ai-a' + (t.error ? ' ng' : '') + '">' + (t.error ? '⚠ ' : '') + esc(t.a) + '</div>');
+    }).join('');
+    byId('aiSend').disabled = !!S.aiBusy;
+    byId('aiExamples').querySelectorAll('.chip').forEach(function (b) { b.disabled = !!S.aiBusy; });
+    byId('aiClear').hidden = !S.ai.length;
+    byId('aiUsage').textContent = S.aiUsage ? '今日の利用：' + S.aiUsage : '';
+    var last = byId('aiLog').lastElementChild;
+    if (last && S.tab === 'ai' && last.scrollIntoView) last.scrollIntoView({ block: 'nearest' });
+  }
+
   // ================================================================ 描画まとめ
 
   function renderMonthLabels() {
@@ -1107,7 +1170,7 @@
   function renderAll() {
     if (!S.me || !S.uiReady || S.dead) return;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === S.tab); });
-    ['mine', 'all', 'events', 'roles', 'staff'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
+    ['mine', 'all', 'events', 'roles', 'staff', 'ai'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
     renderMonthLabels();
     renderMine();
     renderGrid();
