@@ -349,12 +349,14 @@
     nav.hidden = false;
     nav.querySelectorAll('.tab').forEach(function (b) {
       if (S.me.isAdmin && b.dataset.tab === 'mine') b.hidden = true;
-      if (b.dataset.tab === 'staff' || b.dataset.tab === 'ai') b.hidden = !S.me.isAdmin;
+      if (b.dataset.tab === 'staff') b.hidden = !S.me.isAdmin;
+      if (b.dataset.tab === 'ai') b.hidden = false;
       b.addEventListener('click', function () {
         S.tab = b.dataset.tab;
         renderAll();
         if (S.tab === 'events') loadEvents(S.month);
         if (S.tab === 'staff') loadStaffAdmin();
+        if (S.tab === 'ai') loadAiSuggestions();
       });
     });
     document.querySelectorAll('.month-nav').forEach(function (nav) {
@@ -1078,7 +1080,7 @@
     byId('reissueAdminBtn').disabled = !!S.stBusy;
   }
 
-  // ================================================================ AIに質問（管理者だけ）
+  // ================================================================ AIに質問（管理者・スタッフ）
   //
   // ★ 会話はこの画面の中だけに持つ（端末に保存しない）。閉じると消える。
   // ★ 続きの質問のために、直前の3往復だけを文字でサーバーへ渡す。
@@ -1088,8 +1090,21 @@
   var AI_TIMEOUT_MS = 120000;   // Claude を何回か呼ぶので、ふつうの操作より長く待つ
 
   function setupAi() {
-    if (!S.me.isAdmin) return;
     S.ai = [];   // { q, a, error, busy }
+    byId('aiHintAdmin').hidden = !S.me.isAdmin;
+    byId('aiHintStaff').hidden = !!S.me.isAdmin;
+    byId('aiSugList').addEventListener('click', function (ev) {
+      var b = ev.target.closest('button[data-sug]');
+      if (!b || S.sugBusy) return;
+      S.sugBusy = true;
+      renderAiSuggestions();
+      api('aiSuggestionRead', { id: b.dataset.sug }).then(function (r) {
+        S.aiSug = r;
+        byId('aiSugStatus').textContent = '';
+      }, function (e) {
+        byId('aiSugStatus').textContent = '⚠ できませんでした：' + e.message;
+      }).then(function () { S.sugBusy = false; renderAiSuggestions(); });
+    });
     byId('aiForm').addEventListener('submit', function (ev) {
       ev.preventDefault();
       askAi(byId('aiInput').value);
@@ -1125,6 +1140,7 @@
     api('aiAsk', { question: q, history: history }, AI_TIMEOUT_MS).then(function (r) {
       turn.a = r.answer;
       S.aiUsage = r.used + ' / ' + r.limit + '回';
+      if (r.suggested) loadAiSuggestions();
       if (r.proposal) {
         S.ai.forEach(function (t) { if (t.pstate === 'pending') t.pstate = 'old'; });
         turn.proposal = r.proposal;
@@ -1138,6 +1154,32 @@
       S.aiBusy = false;
       renderAi();
     });
+  }
+
+  /** 管理者：AIからの改善提案の一覧（AIタブを開いたとき・提案が増えたときに読み直す） */
+  function loadAiSuggestions() {
+    if (!S.me || !S.me.isAdmin) return;
+    api('aiSuggestions').then(function (r) {
+      S.aiSug = r;
+      byId('aiSugStatus').textContent = '';
+    }, function (e) {
+      byId('aiSugStatus').textContent = '⚠ 改善提案を読み込めませんでした：' + e.message;
+    }).then(renderAiSuggestions);
+  }
+
+  function renderAiSuggestions() {
+    var box = byId('aiSugBox');
+    box.hidden = !S.me.isAdmin;
+    if (box.hidden) return;
+    var r = S.aiSug || { unread: 0, items: [] };
+    byId('aiSugUnread').textContent = r.unread ? '未読 ' + r.unread + '件' : '未読なし';
+    byId('aiSugUnread').className = 'ai-sug-count' + (r.unread ? ' on' : '');
+    byId('aiSugList').innerHTML = r.items.length ? r.items.map(function (x) {
+      var unread = x.status === '未読';
+      return '<li class="' + (unread ? 'unread' : 'read') + '"><div class="ai-sug-meta">' + esc(x.at.slice(5, 16)) + '　' + esc(x.name) + '　<span>' + esc(x.status) + '</span></div>' +
+        '<div class="ai-sug-sum">' + esc(x.summary) + '</div>' + (x.reason ? '<div class="ai-sug-why">理由：' + esc(x.reason) + '</div>' : '') +
+        (unread ? '<button type="button" class="mini" data-sug="' + esc(x.id) + '"' + (S.sugBusy ? ' disabled' : '') + '>確認済みにする</button>' : '') + '</li>';
+    }).join('') : '<li class="read">まだありません</li>';
   }
 
   function applyProposal(turn) {
@@ -1176,7 +1218,7 @@
   }
 
   function renderAi() {
-    if (!S.me || !S.me.isAdmin || !S.ai) return;
+    if (!S.me || !S.ai) return;
     byId('aiLog').innerHTML = S.ai.map(function (t, i) {
       return '<div class="ai-q">' + esc(t.q) + '</div>' +
         (t.busy ? '<div class="ai-a busy">考え中…（10〜30秒ほどかかります）</div>'
