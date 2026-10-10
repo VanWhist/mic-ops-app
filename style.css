@@ -282,3 +282,15 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .ai-prop-acts .primary { min-height: 44px; }
 .ai-prop-msg { margin: 4px 0 0; }
 .ai-prop-msg.ok { color: var(--o); font-weight: 700; } .ai-prop-msg.ng { color: var(--ng); } .ai-prop-msg.busy { color: var(--muted); }
+
+/* AIからの改善提案（管理者だけ） */
+.ai-sug { border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 8px 10px; margin-bottom: 10px; }
+.ai-sug h3 { font-size: 15px; margin: 0 0 4px; }
+.ai-sug-count { font-size: 13px; color: var(--muted); font-weight: 400; }
+.ai-sug-count.on { color: #fff; background: var(--ng); border-radius: 999px; padding: 1px 8px; font-weight: 700; }
+.ai-sug-list { list-style: none; margin: 0; padding: 0; max-height: 40vh; overflow-y: auto; }
+.ai-sug-list li { border-top: 1px solid var(--line); padding: 6px 0; font-size: 14px; }
+.ai-sug-list li.read { color: var(--muted); }
+.ai-sug-meta { font-size: 12px; color: var(--muted); }
+.ai-sug-why { font-size: 13px; color: var(--muted); }
+.ai-sug-list .mini { margin-top: 4px; }
