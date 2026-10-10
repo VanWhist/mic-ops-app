@@ -271,3 +271,14 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .ai-a.ng { color: var(--ng); border-color: var(--ng); }
 .ai-form button { min-height: 44px; }
 .ai-form button:disabled { opacity: .5; }
+
+/* AIの変更案（第3段）。押すまで保存しない */
+.ai-prop { align-self: stretch; border: 2px solid var(--accent); background: var(--card); border-radius: 10px; padding: 10px; font-size: 14px; }
+.ai-prop.done { border-color: var(--line); }
+.ai-prop table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 14px; }
+.ai-prop th, .ai-prop td { border-bottom: 1px solid var(--line); padding: 4px; text-align: left; }
+.ai-prop td.to { font-weight: 700; font-size: 16px; }
+.ai-prop-acts { display: flex; gap: 12px; align-items: center; }
+.ai-prop-acts .primary { min-height: 44px; }
+.ai-prop-msg { margin: 4px 0 0; }
+.ai-prop-msg.ok { color: var(--o); font-weight: 700; } .ai-prop-msg.ng { color: var(--ng); } .ai-prop-msg.busy { color: var(--muted); }

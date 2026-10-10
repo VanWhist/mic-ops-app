@@ -1082,6 +1082,8 @@
   //
   // ★ 会話はこの画面の中だけに持つ（端末に保存しない）。閉じると消える。
   // ★ 続きの質問のために、直前の3往復だけを文字でサーバーへ渡す。
+  // ★ 変更案（第3段）は表示するだけ。［この内容で保存］で案のIDだけを送り、サーバーが置いた案を保存する。
+  //   新しい案が出たら、前の未保存の案はボタンを消す（古い案を押し間違えないように）。
 
   var AI_TIMEOUT_MS = 120000;   // Claude を何回か呼ぶので、ふつうの操作より長く待つ
 
@@ -1095,8 +1097,16 @@
     byId('aiExamples').querySelectorAll('.chip').forEach(function (b) {
       b.addEventListener('click', function () { askAi(b.textContent); });
     });
+    byId('aiLog').addEventListener('click', function (ev) {
+      var b = ev.target.closest('button[data-act]');
+      if (!b) return;
+      var turn = S.ai[+b.dataset.i];
+      if (!turn || !turn.proposal || turn.pstate !== 'pending') return;
+      if (b.dataset.act === 'cancel') { turn.pstate = 'cancelled'; renderAi(); return; }
+      applyProposal(turn);
+    });
     byId('aiClear').addEventListener('click', function () {
-      if (S.aiBusy) return;
+      if (S.aiBusy || S.ai.some(function (t) { return t.pstate === 'saving'; })) return;
       S.ai = [];
       renderAi();
     });
@@ -1115,6 +1125,11 @@
     api('aiAsk', { question: q, history: history }, AI_TIMEOUT_MS).then(function (r) {
       turn.a = r.answer;
       S.aiUsage = r.used + ' / ' + r.limit + '回';
+      if (r.proposal) {
+        S.ai.forEach(function (t) { if (t.pstate === 'pending') t.pstate = 'old'; });
+        turn.proposal = r.proposal;
+        turn.pstate = 'pending';
+      }
     }, function (e) {
       turn.error = true;
       turn.a = e.message;
@@ -1125,12 +1140,48 @@
     });
   }
 
+  function applyProposal(turn) {
+    turn.pstate = 'saving';
+    turn.perr = '';
+    renderAi();
+    api('aiApply', { proposalId: turn.proposal.id }).then(function (r) {
+      turn.pstate = 'saved';
+      turn.savedCount = r.saved.length;
+      refreshBoot();   // 自分の画面の一覧・みんなの予定にも反映する
+    }, function (e) {
+      turn.pstate = e.code === 'ai_expired' ? 'old' : 'pending';
+      turn.perr = e.message;
+    }).then(renderAi);
+  }
+
+  function proposalHtml(t, i) {
+    var p = t.proposal;
+    var rows = p.days.map(function (d) {
+      var md = (+d.date.slice(5, 7)) + '/' + (+d.date.slice(8, 10)) + '(' + d.weekday + ')';
+      var before = d.before ? d.before.status + (d.before.note ? ' ' + d.before.note : '') : '未入力';
+      return '<tr><td>' + esc(md) + '</td><td class="muted">' + esc(before) + '</td><td class="to">' + esc(d.status) + '</td><td>' + esc(d.note) + '</td></tr>';
+    }).join('');
+    var foot;
+    if (t.pstate === 'pending') {
+      foot = '<div class="ai-prop-acts"><button type="button" class="primary" data-act="apply" data-i="' + i + '">この内容で保存</button>' +
+        '<button type="button" class="link-btn" data-act="cancel" data-i="' + i + '">やめる</button></div>';
+    } else if (t.pstate === 'saving') foot = '<p class="ai-prop-msg busy">保存中…</p>';
+    else if (t.pstate === 'saved') foot = '<p class="ai-prop-msg ok">✓ 保存しました（' + t.savedCount + '日）</p>';
+    else if (t.pstate === 'cancelled') foot = '<p class="ai-prop-msg">やめました（保存していません）</p>';
+    else foot = '<p class="ai-prop-msg">この案は使えません（保存していません）</p>';
+    if (t.perr) foot += '<p class="ai-prop-msg ng">⚠ ' + esc(t.perr) + '</p>';
+    return '<div class="ai-prop' + (t.pstate === 'pending' || t.pstate === 'saving' ? '' : ' done') + '">' +
+      '<b>変更案：' + esc(p.name) + 'さん（' + p.days.length + '日）</b>' + (p.summary ? '<div class="muted">' + esc(p.summary) + '</div>' : '') +
+      '<table><thead><tr><th>日付</th><th>今</th><th>変更後</th><th>備考</th></tr></thead><tbody>' + rows + '</tbody></table>' + foot + '</div>';
+  }
+
   function renderAi() {
     if (!S.me || !S.me.isAdmin || !S.ai) return;
-    byId('aiLog').innerHTML = S.ai.map(function (t) {
+    byId('aiLog').innerHTML = S.ai.map(function (t, i) {
       return '<div class="ai-q">' + esc(t.q) + '</div>' +
         (t.busy ? '<div class="ai-a busy">考え中…（10〜30秒ほどかかります）</div>'
-          : '<div class="ai-a' + (t.error ? ' ng' : '') + '">' + (t.error ? '⚠ ' : '') + esc(t.a) + '</div>');
+          : '<div class="ai-a' + (t.error ? ' ng' : '') + '">' + (t.error ? '⚠ ' : '') + esc(t.a) + '</div>') +
+        (t.proposal ? proposalHtml(t, i) : '');
     }).join('');
     byId('aiSend').disabled = !!S.aiBusy;
     byId('aiExamples').querySelectorAll('.chip').forEach(function (b) { b.disabled = !!S.aiBusy; });
