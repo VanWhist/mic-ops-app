@@ -310,3 +310,9 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .deacon-list { list-style: none; margin: 6px 0 0; padding: 0; }
 .deacon-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding: 6px 0; font-size: 14px; }
 .dc-acts { margin-left: auto; display: flex; gap: 6px; }
+
+/* 不在（スタッフの不在期間） */
+.ev-absent { color: #6b4b00; }
+.absent-pick { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 14px; }
+.absent-pick legend { font-size: 13px; color: var(--muted); }
+.absent-pick label { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
