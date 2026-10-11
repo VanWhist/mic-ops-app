@@ -358,6 +358,7 @@
     setupAll();
     setupRoles();
     setupEvents();
+    setupPlan();
     setupStaffAdmin();
     setupFamilyAdmin();
     setupAi();
@@ -449,7 +450,10 @@
     nav.hidden = false;
     nav.querySelectorAll('.tab').forEach(function (b) {
       if (S.me.isAdmin && b.dataset.tab === 'mine') b.hidden = true;
-      if (b.dataset.tab === 'staff') b.hidden = !S.me.isAdmin;
+      if (b.dataset.tab === 'staff' || b.dataset.tab === 'plan') b.hidden = !S.me.isAdmin;
+      // 管理者はタブが6つになるので、2つを短くして1行に収める（v14〜）
+      if (S.me.isAdmin && b.dataset.tab === 'roles') b.textContent = '役割';
+      if (S.me.isAdmin && b.dataset.tab === 'staff') b.textContent = '管理';
       if (b.dataset.tab === 'ai') b.hidden = !!S.family;
       if (b.dataset.tab === 'roles' && S.family) b.hidden = true;
       b.addEventListener('click', function () {
@@ -457,6 +461,7 @@
         renderAll();
         if (S.tab === 'events') { if (S.family) S.ansMsg = null; loadEvents(S.month, !!S.family); }   // 家族は開くたびに最新の受付・回答を読む
         if (S.tab === 'staff') { loadStaffAdmin(); loadFamilies(); }
+        if (S.tab === 'plan') renderPlan();
         if (S.tab === 'ai') loadAiSuggestions();
       });
     });
@@ -629,7 +634,7 @@
     var who = S.family ? esc(nameOf(S.curAthlete)) + (S.sibAll ? 'と兄弟' : '') + 'の' : '';
     byId('penNow').innerHTML = S.pen
       ? who + '<span class="mk ' + STATUS_CLASS[S.pen] + '">' + S.pen + '</span>（' + PEN_NAME[S.pen] + '）を入力中' + (S.range ? '・期間でまとめて' : '')
-      : '<span class="mk s-n">消</span>消す（未回答に戻す）を入力中' + (S.range ? '・期間でまとめて' : '');
+      : '<span class="mk s-n">消</span>消す（未入力に戻す）を入力中' + (S.range ? '・期間でまとめて' : '');
 
     var cal = byId('cal');
     var days = daysOf(S.month);
@@ -733,7 +738,14 @@
       h += '<th class="dh ' + c + (S.selectedDay === d ? ' sel' : '') + (d === today ? ' today' : '') + '"><button type="button" data-day="' + d + '">' +
         parts(d)[2] + '<small>' + WD[w] + '</small></button></th>';
     });
-    h += '</tr></thead><tbody>';
+    h += '</tr>';
+    if (!S.family) {
+      // 日ごとの○の人数（v14〜・表の一番上にも）
+      h += '<tr class="ocount"><th class="nm">○の人数</th>' + days.map(function (d) {
+        return '<td>' + rows.filter(function (st) { return gridVal(st.staffId, d).s === '○'; }).length + '</td>';
+      }).join('') + '</tr>';
+    }
+    h += '</thead><tbody>';
     rows.forEach(function (st) {
       var self = !gridAthletes() && S.me.staffId === st.staffId;
       h += '<tr' + (self ? ' class="self"' : '') + '><th class="nm">' + esc(st.name) + '</th>';
@@ -1041,6 +1053,13 @@
       var act = b.dataset.act, key = b.dataset.key;
       if (act === 'open') { S.openEvent = S.openEvent === key ? null : key; renderEvents(); return; }
       if (!S.me.isAdmin || S.evBusy) return;
+      if (act === 'plan-edit') { openPlanEditorFor(key); return; }
+      if (act === 'replaced') {
+        var rep = b.dataset.on === '1';
+        if (rep && !window.confirm('この予定を「アプリ版に置き換え済み」にします。\n計画・カレンダー反映・スタッフ・家族の画面から隠れます（元のカレンダーは変わりません）。よろしいですか？')) return;
+        adminOp('setReplaced', { eventKey: key, replaced: rep });
+        return;
+      }
       if (act === 'answer-open') {
         var on = b.dataset.open === '1';
         if (!on && !window.confirm('参加の受付を止めます。\n家族は回答できなくなります（それまでの回答は残ります）。よろしいですか？')) return;
@@ -1197,7 +1216,7 @@
     }, function (e) {
       var msg = e.code === 'bad_request' && /不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です。更新後に「最新にする」を押してください' : e.message;
       S.events[month] = { status: 'error', error: msg, data: cur && cur.data, at: cur && cur.at };
-    }).then(function () { if (S.tab === 'events') renderSafe(); else renderEvents(); });
+    }).then(function () { if (S.tab === 'events') renderSafe(); else renderEvents(); if (S.tab === 'plan') renderPlan(); });
   }
 
   /** 管理者の操作。成功したらサーバーが返した月の予定で描き直す。then は続けて行う操作 */
@@ -1297,24 +1316,445 @@
     });
   }
 
+  // ================================================================ 計画（v14〜・管理者だけ）
+  //
+  // 空き（スタッフ・選手の○の人数）を見たまま期間を選び、予定を作って担当を決める。
+  // ★ 作った予定は app_events（アプリでだけ編集）。下書きは管理者だけに見え、カレンダーに反映しない。
+  // ★ 既存のカレンダーの予定（読むだけ）とアプリの予定は帯の色で、下書きは点線で見分ける。
+  // ★ 予定の説明文（選手名）はサーバーがそもそも返さない。
+
+  var PLAN_TYPES = [['練習', '練習会'], ['合宿', '合宿'], ['大会', '大会'], ['一般レッスン', '一般レッスン'], ['不在', '不在']];
+  var ROLES_BY_TYPE = { '練習': ['coaching'], '合宿': ['coaching', 'escort'], '大会': ['escort'], '一般レッスン': ['lesson'], '不在': [] };
+  var CAT_LABEL = { full: '全日○', part: '一部○', maybe: '△あり', none: '未回答', ng: '×' };
+  var CAT_ORDER = ['full', 'part', 'maybe', 'none', 'ng'];
+
+  function setupPlan() {
+    if (!S.me.isAdmin) return;
+    S.plan = { start: null, end: null, pick: 'start', view: 'staff', ed: null, busy: false, msg: null };
+    byId('plCal').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-date]');
+      if (b) planTap(b.dataset.date);
+    });
+    byId('plReload').addEventListener('click', function () {
+      refreshBoot();
+      planMonths().forEach(function (m) { loadEvents(m, true, true); });
+    });
+    var tab = byId('tab-plan');
+    tab.addEventListener('click', planClick);
+    tab.addEventListener('change', planChange);
+    tab.addEventListener('input', function (e) {
+      var f = e.target.dataset && e.target.dataset.ed;
+      if (f && S.plan.ed && (f === 'name' || f === 'memo')) S.plan.ed[f] = e.target.value;
+    });
+  }
+
+  function addDays(d, n) {
+    var p = parts(d);
+    var x = new Date(Date.UTC(p[0], p[1] - 1, p[2] + n));
+    return x.getUTCFullYear() + '-' + ('0' + (x.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + x.getUTCDate()).slice(-2);
+  }
+  function datesBetween(a, b) {
+    var out = [];
+    for (var d = a; d <= b && out.length < 62; d = addDays(d, 1)) out.push(d);
+    return out;
+  }
+  function monthsBetween(a, b) {
+    var out = [];
+    monthsOf(S.period).forEach(function (m) { if (m >= a.slice(0, 7) && m <= b.slice(0, 7)) out.push(m); });
+    return out;
+  }
+  function planMonths() {
+    var ms = [S.month];
+    var p = S.plan, ed = p && p.ed;
+    if (p && p.start) monthsBetween(p.start, p.end || p.start).forEach(function (m) { if (ms.indexOf(m) < 0) ms.push(m); });
+    if (ed && ed.startDate && ed.endDate) monthsBetween(ed.startDate, ed.endDate).forEach(function (m) { if (ms.indexOf(m) < 0) ms.push(m); });
+    return ms;
+  }
+  function inPeriodDate(d) { return /^\d{4}-\d{2}-\d{2}$/.test(d) && inPeriod(d); }
+
+  /** 読み込んだ月の予定（同じ予定は1つ）。置き換え済みは出さない */
+  function planEvents() {
+    var out = [], seen = {};
+    Object.keys(S.events).forEach(function (m) {
+      var e = S.events[m];
+      ((e && e.data && e.data.events) || []).forEach(function (ev) {
+        if (seen[ev.key] || ev.replaced) return;
+        seen[ev.key] = true;
+        out.push(ev);
+      });
+    });
+    out.sort(function (a, b) { return a.start < b.start ? -1 : a.start > b.start ? 1 : 0; });
+    return out;
+  }
+
+  /** 1回目のタップで開始日、2回目で終了日（前の日を押したら入れ替える） */
+  function planTap(d) {
+    var p = S.plan;
+    if (p.pick === 'start' || !p.start) { p.start = d; p.end = d; p.pick = 'end'; }
+    else { if (d < p.start) { p.end = p.start; p.start = d; } else p.end = d; p.pick = 'start'; }
+    p.msg = null;
+    renderPlan();
+  }
+
+  /** 期間の○△×の分け方：全日○／一部○／△あり／未回答／× */
+  function planCat(valFn, id, dates) {
+    var o = 0, t = 0, x = 0, n = 0;
+    dates.forEach(function (d) { var s = valFn(id, d).s; if (s === '○') o++; else if (s === '△') t++; else if (s === '×') x++; else n++; });
+    var cat = o === dates.length ? 'full' : o ? 'part' : t ? 'maybe' : n === dates.length ? 'none' : 'ng';
+    return { cat: cat, o: o, t: t, x: x, n: n, days: dates.length };
+  }
+  function athVal(id, d) { var m = (S.aAvail || {})[id]; return (m && m[d]) || { s: '', n: '' }; }
+  function staffVal(id, d) { return valueOf(id, d); }
+  function planBreak(dates) {
+    var b = function (list, idOf, valFn) {
+      var out = { full: [], part: [], maybe: [], none: [], ng: [] };
+      list.forEach(function (x) { var c = planCat(valFn, idOf(x), dates); out[c.cat].push({ name: x.name, c: c }); });
+      return out;
+    };
+    return {
+      staff: b(S.staff, function (x) { return x.staffId; }, staffVal),
+      ath: b(S.athletes || [], function (x) { return x.athleteId; }, athVal)
+    };
+  }
+  function breakLine(br, short) {
+    return CAT_ORDER.filter(function (k) { return !short || br[k].length; }).map(function (k) { return CAT_LABEL[k] + ' ' + br[k].length; }).join('・') || 'なし';
+  }
+
+  /** スタッフの役割順：コーチング → 一般レッスン → 大会引率（希望・可能な最初の役割）→ 未登録 */
+  function staffByRole() {
+    var order = ['coaching', 'lesson', 'escort'];
+    return S.staff.map(function (st, i) {
+      var r = S.roles[st.staffId];
+      var g = 3;
+      if (r) order.some(function (k, j) { if (ROLE_TOP[k].indexOf(r[k]) >= 0) { g = j; return true; } return false; });
+      return { st: st, i: i, g: g };
+    }).sort(function (a, b) { return a.g - b.g || a.i - b.i; });
+  }
+
+  function renderPlan() {
+    if (!S.me || !S.me.isAdmin || !S.plan || S.tab !== 'plan') return;
+    planMonths().forEach(function (m) { if (!S.events[m]) loadEvents(m); });
+    var p = S.plan;
+    var st = byId('plStatus');
+    var cur = S.events[S.month];
+    if (p.msg) { st.innerHTML = p.msg.html || esc(p.msg.text); st.className = 'ev-status ' + p.msg.kind; }
+    else if (!cur || cur.status === 'loading') { st.textContent = '予定を読み込み中…'; st.className = 'ev-status busy'; }
+    else if (cur.status === 'error') { st.textContent = '⚠ 予定を読み込めませんでした：' + cur.error; st.className = 'ev-status ng'; }
+    else { st.textContent = ''; st.className = 'ev-status'; }
+    var editing = !!p.ed;
+    byId('plMain').hidden = editing;
+    byId('plEditor').hidden = !editing;
+    if (editing) { renderPlanEditor(); return; }
+    renderPlanCal();
+    renderPlanDetail();
+  }
+
+  function renderPlanCal() {
+    var p = S.plan;
+    var days = daysOf(S.month);
+    var evs = planEvents();
+    var today = todayJst();
+    var nAth = (S.athletes || []).length;
+    var h = '';
+    for (var i = 0; i < weekday(days[0]); i++) h += '<span class="blank"></span>';
+    days.forEach(function (d) {
+      var so = S.staff.filter(function (x) { return valueOf(x.staffId, d).s === '○'; }).length;
+      var ao = (S.athletes || []).filter(function (x) { return athVal(x.athleteId, d).s === '○'; }).length;
+      var mine = evs.filter(function (ev) { return ev.dates.indexOf(d) >= 0; });
+      var w = weekday(d);
+      var cls = ['pl-day'];
+      if (w === 0 || HOLIDAYS[d]) cls.push('sun'); else if (w === 6) cls.push('sat');
+      if (p.start && d >= p.start && d <= (p.end || p.start)) cls.push('in-range');
+      if (d === p.start) cls.push('r-start');
+      if (d === (p.end || p.start)) cls.push('r-end');
+      if (d === today) cls.push('today');
+      h += '<button type="button" class="' + cls.join(' ') + '" data-date="' + d + '" aria-label="' + esc(longDate(d) + ' スタッフ○' + so + '人 選手○' + ao + '人' + mine.map(function (ev) { return '・' + ev.title; }).join('')) + '">' +
+        '<span class="dn">' + parts(d)[2] + '</span>' +
+        '<span class="cnt"><i>ス</i>' + so + '/' + S.staff.length + '</span>' +
+        '<span class="cnt"><i>選</i>' + ao + '/' + nAth + '</span>' +
+        mine.slice(0, 2).map(function (ev) {
+          return '<span class="band ' + bandClass(ev) + '">' + esc(ev.title) + '</span>';
+        }).join('') + (mine.length > 2 ? '<span class="band more">+' + (mine.length - 2) + '</span>' : '') +
+        '</button>';
+    });
+    byId('plCal').innerHTML = h;
+  }
+
+  function bandClass(ev) {
+    if (ev.cal === 'アプリ') return 'b-app' + (ev.appStatus === '下書き' ? ' b-draft' : '') + (ev.cancelled ? ' b-cancel' : '');
+    return 'b-cal' + (ev.cancelled ? ' b-cancel' : '');
+  }
+
+  function renderPlanDetail() {
+    var p = S.plan, el = byId('plDetail');
+    if (!p.start) { el.innerHTML = '<p class="hint pl-pick">日付を2回タップして期間を選んでください（1回目＝開始日、2回目＝終了日。1日だけなら同じ日を2回）。</p>'; return; }
+    var end = p.end || p.start;
+    var dates = datesBetween(p.start, end);
+    var br = planBreak(dates);
+    var lim = S.period ? { min: S.period.start + '-01', max: daysOf(S.period.end).slice(-1)[0] } : {};
+    var h = '<div class="pl-detail">' +
+      '<div class="pl-range"><label>開始日 <input type="date" data-pd="start" value="' + p.start + '" min="' + lim.min + '" max="' + lim.max + '"></label>' +
+      '<label>終了日 <input type="date" data-pd="end" value="' + end + '" min="' + lim.min + '" max="' + lim.max + '"></label>' +
+      '<span class="muted">' + dates.length + '日間' + (p.pick === 'end' ? '（終了日をタップ）' : '') + '</span></div>';
+    h += '<div class="pl-break">' + breakBox('スタッフ', br.staff, S.staff.length) + breakBox('選手', br.ath, (S.athletes || []).length) + '</div>';
+    // 日別の○△×
+    h += '<div class="pl-view" role="radiogroup" aria-label="表に出す人"><label><input type="radio" name="plView" value="staff"' + (p.view === 'staff' ? ' checked' : '') + '> スタッフ（役割順）</label>' +
+      '<label><input type="radio" name="plView" value="ath"' + (p.view === 'ath' ? ' checked' : '') + '> 選手</label></div>';
+    h += '<div class="grid-wrap pl-grid-wrap"><table class="grid pl-grid"><thead><tr><th class="corner">' + (dates.length) + '日</th>' +
+      dates.map(function (d) {
+        var w = weekday(d);
+        return '<th class="dh ' + ((w === 0 || HOLIDAYS[d]) ? 'sun' : w === 6 ? 'sat' : '') + '"><span>' + (+d.slice(5, 7)) + '/' + (+d.slice(8, 10)) + '<small>' + WD[w] + '</small></span></th>';
+      }).join('') + '</tr></thead><tbody>';
+    var rows = p.view === 'ath'
+      ? (S.athletes || []).map(function (a) { return { id: a.athleteId, name: a.name, val: athVal, tag: '' }; })
+      : staffByRole().map(function (x) { return { id: x.st.staffId, name: x.st.name, val: staffVal, tag: ['コーチ', 'レッスン', '引率', '—'][x.g] }; });
+    rows.forEach(function (r) {
+      h += '<tr><th class="nm">' + esc(r.name) + (r.tag ? '<small class="rt">' + r.tag + '</small>' : '') + '</th>' + dates.map(function (d) {
+        var v = r.val(r.id, d);
+        return '<td class="' + STATUS_CLASS[v.s] + '"' + (v.n ? ' title="' + esc(v.n) + '"' : '') + '>' + esc(v.s) + (v.n ? '<i class="nd"></i>' : '') + '</td>';
+      }).join('') + '</tr>';
+    });
+    if (!rows.length) h += '<tr><td>' + (p.view === 'ath' ? '選手がまだ登録されていません' : '') + '</td></tr>';
+    h += '</tbody></table></div>';
+    // 期間に重なる予定
+    var over = planEvents().filter(function (ev) { return ev.dates.some(function (d) { return d >= p.start && d <= end; }); });
+    h += '<h3 class="pl-h">この期間の予定（' + over.length + '件）</h3>';
+    h += over.length ? '<ul class="pl-evs">' + over.map(function (ev) {
+      return '<li class="' + bandClass(ev) + '"><span class="pl-ev-date">' + evDateLabel(ev) + '</span> <b>' + esc(ev.title) + '</b> ' +
+        '<span class="badge type">' + esc(ev.type === '練習' ? '練習会' : ev.type) + '</span>' +
+        (ev.cal === 'アプリ' ? '<span class="badge app">アプリ</span>' + (ev.appStatus !== '確定' ? '<span class="badge ' + (ev.appStatus === '下書き' ? 'draft' : 'tent') + '">' + esc(ev.appStatus) + '</span>' : '') +
+          ' <button type="button" class="mini" data-pa="edit" data-key="' + ev.key + '">開く</button>'
+          : '<span class="badge calsrc">' + (ev.cal === 'レッスン' ? 'MICレッスン' : ev.cal === 'Deacon' ? 'Deacon' : 'MICスケジュール') + '（読むだけ）</span>') +
+        '</li>';
+    }).join('') + '</ul>' : '<p class="muted">重なる予定はありません。</p>';
+    h += '<button type="button" class="primary pl-create" data-pa="create">この期間で予定を作る</button></div>';
+    el.innerHTML = h;
+  }
+
+  function breakBox(label, br, total) {
+    return '<div class="pl-bk"><b>' + label + '（' + total + '人）</b><ul>' + CAT_ORDER.map(function (k) {
+      return '<li class="k-' + k + '"><span class="kl">' + CAT_LABEL[k] + '</span><span class="kn">' + br[k].length + '</span>' +
+        (br[k].length ? '<small>' + br[k].map(function (x) { return esc(x.name); }).join('・') + '</small>' : '') + '</li>';
+    }).join('') + '</ul></div>';
+  }
+
+  function newOpId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
+
+  function openPlanEditor(ed) {
+    ed.opId = newOpId();
+    S.plan.ed = ed;
+    S.plan.msg = null;
+    S.tab = 'plan';
+    renderAll();
+    window.scrollTo(0, 0);
+  }
+
+  function openPlanEditorFor(key) {
+    var ev = planEventsAll().filter(function (x) { return x.key === key; })[0];
+    if (!ev || ev.cal !== 'アプリ') return;
+    var t = function (s) { return s.length > 10 ? s.slice(11, 16) : ''; };
+    var assign = {};
+    ev.assigned.forEach(function (a) { (assign[a.staffId] = assign[a.staffId] || []).push(a.role); });
+    if (!S.plan.start) { S.plan.start = ev.dates[0]; S.plan.end = ev.dates[ev.dates.length - 1]; }
+    openPlanEditor({
+      id: ev.appId, status: ev.appStatus, type: ev.type, name: ev.title, venue: ev.venue || '',
+      startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1], allDay: ev.allDay,
+      startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', assign: assign, people: (ev.absentees || []).slice()
+    });
+  }
+  /** 置き換え済みも含めて探す（予定と担当から開くとき） */
+  function planEventsAll() {
+    var out = [];
+    Object.keys(S.events).forEach(function (m) { var e = S.events[m]; ((e && e.data && e.data.events) || []).forEach(function (ev) { out.push(ev); }); });
+    return out;
+  }
+
+  function planClick(e) {
+    var b = e.target.closest('[data-pa]');
+    if (!b || b.disabled) return;
+    var p = S.plan, act = b.dataset.pa;
+    if (act === 'create') {
+      openPlanEditor({ id: null, status: '', type: '練習', name: '', venue: '', startDate: p.start, endDate: p.end || p.start, allDay: true, startTime: '', endTime: '', memo: '', assign: {}, people: [] });
+    } else if (act === 'edit') {
+      openPlanEditorFor(b.dataset.key);
+    } else if (act === 'back') {
+      if (p.busy) return;
+      p.ed = null; renderPlan();
+    } else if (act === 'role') {
+      var ed = p.ed, sid = b.dataset.staff, role = b.dataset.role;
+      var cur = ed.assign[sid] = ed.assign[sid] || [];
+      var i = cur.indexOf(role);
+      if (i >= 0) cur.splice(i, 1); else cur.push(role);
+      renderPlanEditor();
+    } else if (act === 'save') {
+      savePlan(b.dataset.status);
+    } else if (act === 'delete') {
+      if (p.busy || !window.confirm('この下書きを消します。よろしいですか？（担当も消えます）')) return;
+      planOp('deleteAppEvent', { id: p.ed.id }, '下書きを消しました');
+    } else if (act === 'goto-events') {
+      S.tab = 'events'; renderAll(); loadEvents(S.month);
+    }
+  }
+
+  function planChange(e) {
+    var t = e.target, p = S.plan;
+    if (t.name === 'plView') { p.view = t.value; renderPlan(); return; }
+    if (t.dataset.pd) {
+      var v = t.value;
+      if (!inPeriodDate(v)) { renderPlan(); return; }
+      if (t.dataset.pd === 'start') { p.start = v; if (!p.end || p.end < v) p.end = v; }
+      else { p.end = v; if (!p.start || p.start > v) p.start = v; }
+      p.pick = 'start';
+      renderPlan();
+      return;
+    }
+    var f = t.dataset.ed;
+    if (!f || !p.ed) return;
+    var ed = p.ed;
+    if (f === 'allDay') ed.allDay = t.checked;
+    else if (f === 'person') {
+      var i = ed.people.indexOf(t.value);
+      if (t.checked && i < 0) ed.people.push(t.value); else if (!t.checked && i >= 0) ed.people.splice(i, 1);
+      return;
+    } else ed[f] = t.value;
+    if (f === 'startDate' || f === 'endDate') {
+      if (!inPeriodDate(ed[f])) ed[f] = f === 'startDate' ? p.start : (p.end || p.start);
+      if (ed.endDate < ed.startDate) { if (f === 'startDate') ed.endDate = ed.startDate; else ed.startDate = ed.endDate; }
+    }
+    if (f === 'type' || f === 'allDay' || f === 'startDate' || f === 'endDate') renderPlanEditor();
+  }
+
+  function renderPlanEditor() {
+    var p = S.plan, ed = p.ed;
+    var dates = datesBetween(ed.startDate, ed.endDate);
+    var br = planBreak(dates);
+    var roles = ROLES_BY_TYPE[ed.type] || [];
+    var lim = { min: S.period.start + '-01', max: daysOf(S.period.end).slice(-1)[0] };
+    var isNew = !ed.id;
+    var h = '<div class="pl-sticky"><div><b>' + esc(ed.startDate === ed.endDate ? longDate(ed.startDate) : longDate(ed.startDate) + '〜' + longDate(ed.endDate)) + '</b> ' + dates.length + '日間' +
+      (ed.status ? ' <span class="badge ' + (ed.status === '下書き' ? 'draft' : ed.status === '中止' ? 'tent' : 'venue') + '">' + esc(ed.status) + '</span>' : ' <span class="badge draft">新規</span>') + '</div>' +
+      '<div class="pl-sum"><span>スタッフ：' + breakLine(br.staff, true) + '</span><span>選手：' + breakLine(br.ath, true) + '</span></div></div>';
+    h += '<button type="button" class="link-btn" data-pa="back"' + (p.busy ? ' disabled' : '') + '>← 計画に戻る（保存しない）</button>';
+    h += '<div class="pl-form">' +
+      '<label>種類 <select data-ed="type">' + PLAN_TYPES.map(function (t) { return '<option value="' + t[0] + '"' + (ed.type === t[0] ? ' selected' : '') + '>' + t[1] + '</option>'; }).join('') + '</select></label>' +
+      '<label>名前 <input type="text" data-ed="name" maxlength="40" value="' + esc(ed.name) + '" placeholder="例：白馬合宿"></label>' +
+      '<label>会場 <select data-ed="venue"><option value="">なし（会場で絞らない）</option>' + S.venues.map(function (v) { return '<option' + (ed.venue === v ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join('') + '</select></label>' +
+      '<div class="pl-dates"><label>開始日 <input type="date" data-ed="startDate" value="' + ed.startDate + '" min="' + lim.min + '" max="' + lim.max + '"></label>' +
+      '<label>終了日 <input type="date" data-ed="endDate" value="' + ed.endDate + '" min="' + lim.min + '" max="' + lim.max + '"></label></div>' +
+      '<label class="chk"><input type="checkbox" data-ed="allDay"' + (ed.allDay ? ' checked' : '') + '> 終日</label>' +
+      (ed.allDay ? '' : '<div class="pl-dates"><label>開始時刻 <input type="time" step="300" data-ed="startTime" value="' + esc(ed.startTime) + '"></label>' +
+        '<label>終了時刻 <input type="time" step="300" data-ed="endTime" value="' + esc(ed.endTime) + '"></label></div>') +
+      '<label>スタッフ向けメモ <textarea data-ed="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(ed.memo) + '</textarea></label></div>';
+    // 担当（または不在の人）
+    var cands = staffCands(dates);
+    if (ed.type === '不在') {
+      h += '<h3 class="pl-h">不在の人</h3><div class="pl-people">' + S.staff.map(function (st) {
+        return '<label><input type="checkbox" data-ed="person" value="' + esc(st.staffId) + '"' + (ed.people.indexOf(st.staffId) >= 0 ? ' checked' : '') + '> ' + esc(st.name) + '</label>';
+      }).join('') + '</div>';
+    } else {
+      var chosen = [];
+      S.staff.forEach(function (st) { (ed.assign[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) chosen.push(esc(st.name) + '（' + ROLE_SHORT[r] + '）'); }); });
+      h += '<h3 class="pl-h">担当 <small class="muted">' + (chosen.length ? chosen.join('・') : '未定') + '</small></h3>' +
+        '<p class="hint">全日○ → 一部○ → △ → 未回答 → × の順。役割のボタンを押すと担当になります（もう一度押すと外れます）。</p>' +
+        '<ul class="pl-cands">' + cands.map(function (x) {
+          var c = x.c, r = S.roles[x.st.staffId];
+          return '<li class="k-' + c.cat + '"><span class="nm">' + esc(x.st.name) + '</span>' +
+            '<span class="av">○ ' + c.o + '/' + c.days + '日' + (c.t ? '・△' + c.t : '') + (c.x ? '・×' + c.x : '') + '</span>' +
+            '<span class="rb">' + roles.map(function (role) {
+              var on = (ed.assign[x.st.staffId] || []).indexOf(role) >= 0;
+              var pref = r && r[role] ? (r[role] === '積極的にやりたい' ? '積極的' : r[role]) : '';
+              return '<button type="button" class="role-btn' + (on ? ' on' : '') + '" data-pa="role" data-staff="' + esc(x.st.staffId) + '" data-role="' + role + '" aria-pressed="' + on + '">' +
+                (on ? '✓' : '') + ROLE_SHORT[role] + (pref ? '<small>' + esc(pref) + '</small>' : '') + '</button>';
+            }).join('') + '</span></li>';
+        }).join('') + '</ul>';
+    }
+    // ボタン
+    var dis = p.busy ? ' disabled' : '';
+    h += '<div class="pl-acts">';
+    if (isNew || ed.status === '下書き') {
+      h += '<button type="button" class="secondary" data-pa="save" data-status="下書き"' + dis + '>下書き保存</button>' +
+        '<button type="button" class="primary" data-pa="save" data-status="確定"' + dis + '>確定</button>';
+      if (!isNew) h += '<button type="button" class="link-btn danger-link" data-pa="delete"' + dis + '>下書きを消す</button>';
+    } else if (ed.status === '確定') {
+      h += '<button type="button" class="primary" data-pa="save" data-status="確定"' + dis + '>保存</button>' +
+        '<button type="button" class="secondary" data-pa="save" data-status="下書き"' + dis + '>下書きに戻す</button>' +
+        '<button type="button" class="link-btn danger-link" data-pa="save" data-status="中止"' + dis + '>中止にする</button>';
+    } else {
+      h += '<button type="button" class="primary" data-pa="save" data-status="確定"' + dis + '>確定に戻す</button>' +
+        '<button type="button" class="secondary" data-pa="save" data-status="中止"' + dis + '>中止のまま保存</button>';
+    }
+    h += '</div><p class="hint">下書きは管理者だけに見えます（カレンダーに反映せず、家族にも出ません）。確定すると「予定と担当」で参加の受付・カレンダー反映ができます。</p>';
+    byId('plEditor').innerHTML = h;
+  }
+
+  function staffCands(dates) {
+    var rank = { full: 0, part: 1, maybe: 2, none: 3, ng: 4 };
+    return S.staff.map(function (st, i) { return { st: st, i: i, c: planCat(staffVal, st.staffId, dates) }; })
+      .sort(function (a, b) { return rank[a.c.cat] - rank[b.c.cat] || b.c.o - a.c.o || b.c.t - a.c.t || a.i - b.i; });
+  }
+
+  function savePlan(status) {
+    var p = S.plan, ed = p.ed;
+    if (p.busy) return;
+    if (!String(ed.name || '').trim()) { p.msg = { kind: 'ng', text: '⚠ 名前を入れてください' }; renderPlan(); return; }
+    if (!ed.allDay && (!ed.startTime || !ed.endTime)) { p.msg = { kind: 'ng', text: '⚠ 時刻を入れるか、「終日」にしてください' }; renderPlan(); return; }
+    if (status === '中止' && ed.status !== '中止' && !window.confirm('この予定を中止にします。\nカレンダーからは次の反映で消え、家族にも出なくなります。よろしいですか？')) return;
+    var roles = ROLES_BY_TYPE[ed.type] || [];
+    var assignments = [];
+    S.staff.forEach(function (st) { (ed.assign[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) assignments.push({ staffId: st.staffId, role: r }); }); });
+    var body = {
+      opId: ed.opId, id: ed.id || undefined, type: ed.type, name: ed.name, venue: ed.venue,
+      startDate: ed.startDate, endDate: ed.endDate, allDay: !!ed.allDay, startTime: ed.allDay ? '' : ed.startTime, endTime: ed.allDay ? '' : ed.endTime,
+      status: status, memo: ed.memo, assignments: ed.type === '不在' ? [] : assignments, people: ed.type === '不在' ? ed.people : []
+    };
+    var label = status === '下書き' ? '下書きで保存しました' : status === '中止' ? '中止にしました' : '確定しました';
+    planOp('saveAppEvent', body, label, status === '確定');
+  }
+
+  function planOp(action, body, label, linkEvents) {
+    var p = S.plan, ed = p.ed;
+    var touched = ed ? monthsBetween(ed.startDate, ed.endDate) : [];
+    p.busy = true;
+    p.msg = { kind: 'busy', text: '保存中…' };
+    renderPlan();
+    api(action, Object.assign({ month: S.month }, body)).then(function (r) {
+      S.events[S.month] = { status: 'ok', data: r, at: Date.now() };
+      // ほかの月（期間が月をまたぐ・日付を動かした）は読み直す
+      Object.keys(S.events).forEach(function (m) { if (m !== S.month) delete S.events[m]; });
+      if (ed) { p.start = ed.startDate; p.end = ed.endDate; p.pick = 'start'; }
+      p.ed = null;
+      p.msg = { kind: 'ok', html: '✓ ' + esc((ed && ed.name ? ed.name + '：' : '') + label) +
+        (linkEvents ? ' <button type="button" class="mini" data-pa="goto-events">予定と担当で参加の受付・カレンダー反映へ</button>' : '') };
+      saveCache();
+      loadCalStatus();
+    }, function (e) {
+      p.msg = { kind: 'ng', text: '⚠ 保存できませんでした：' + (/不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message) };
+    }).then(function () { p.busy = false; renderPlan(); renderEvents(); });
+  }
+
   function renderEventCard(ev) {
     var open = S.openEvent === ev.key;
     var badges = '<span class="badge type">' + esc(ev.type) + (ev.typeFixed ? '✎' : '') + '</span>' +
       (ev.venue ? '<span class="badge venue">' + esc(ev.venue) + (ev.venueFixed ? '✎' : '') + '</span>' : '<span class="badge novenue">会場：' + (ev.venueFixed ? '絞らない✎' : '推定なし') + '</span>') +
       (ev.tentative ? '<span class="badge tent">仮</span>' : '') +
       (ev.cal === 'レッスン' ? '<span class="badge calsrc">MICレッスン</span>' : '') +
-      (ev.cal === 'Deacon' ? '<span class="badge calsrc">アプリで登録</span>' : '');
+      (ev.cal === 'Deacon' ? '<span class="badge calsrc">アプリで登録</span>' : '') +
+      (ev.cal === 'アプリ' ? '<span class="badge app">アプリの予定</span>' : '') +
+      (ev.appStatus === '下書き' ? '<span class="badge draft">下書き（管理者だけに表示）</span>' : '') +
+      (ev.appStatus === '中止' ? '<span class="badge tent">中止</span>' : '') +
+      (ev.replaced ? '<span class="badge calsrc">アプリ版に置き換え済み（計画・反映・スタッフ・家族から隠しています）</span>' : '');
     var absent = ev.type === '不在';   // スタッフの不在期間：担当は付けず「不在：誰」を出す
     var assigned = ev.assigned.length ? ev.assigned.map(function (a) {
       var c = availOn(a.staffId, ev.dates);
       var warn = c.x ? ' <span class="warn">⚠×の日あり</span>' : (c.n ? ' <span class="warn">⚠未回答の日あり</span>' : '');
       return '<b>' + esc(nameOf(a.staffId)) + '</b>（' + (ROLE_SHORT[a.role] || esc(a.role)) + '）' + warn;
     }).join('、') : '<span class="muted">未定</span>';
-    var h = '<article class="ev' + (open ? ' open' : '') + '" data-key="' + ev.key + '">' +
+    var h = '<article class="ev' + (open ? ' open' : '') + (ev.appStatus === '下書き' ? ' draft' : '') + (ev.replaced || ev.cancelled ? ' dim' : '') + '" data-key="' + ev.key + '">' +
       '<div class="ev-date">' + evDateLabel(ev) + '</div>' +
       '<h3 class="ev-title">' + esc(ev.title) + '</h3>' +
       (ev.location ? '<div class="ev-loc">' + esc(ev.location) + '</div>' : '') +
       '<div class="badges">' + badges + '</div>' +
+      (ev.memo && !S.family ? '<div class="ev-memo">メモ：' + esc(ev.memo) + '</div>' : '') +
       (S.family ? '' : absent
         ? '<div class="ev-assigned ev-absent">不在：' + (ev.absentees && ev.absentees.length ? ev.absentees.map(function (id) { return '<b>' + esc(nameOf(id)) + '</b>'; }).join('・') + (ev.absentFixed ? '✎' : '') : '<span class="muted">（未定）</span>') + '</div>'
         : '<div class="ev-assigned">担当：' + assigned + '</div>') +
@@ -1392,6 +1832,16 @@
     });
     if (busy.length) h += '<p class="rest">行けない・未回答：' + busy.join('、') + '</p>';
 
+    if (ev.cal === 'アプリ') {
+      // アプリで作った予定は「計画」で直す（種類・名前・日時・会場・メモ・担当）
+      h += '<div class="ev-meta"><h4>この予定を直す</h4><button type="button" class="mini" data-act="plan-edit" data-key="' + ev.key + '">計画で直す（日時・種類・担当など）</button></div>';
+      return h + '</div>';
+    }
+    // 既存の予定を、アプリで作り直したとき：計画・反映・スタッフ・家族から隠す（自動では判定しない）
+    h += '<div class="ev-meta"><h4>アプリ版に置き換え</h4>' +
+      '<p class="hint">「計画」で同じ予定を作り直したら付けてください。計画・カレンダー反映・スタッフ・家族の画面から隠します（元のカレンダーは変えません）。</p>' +
+      '<button type="button" class="mini' + (ev.replaced ? ' ghost' : '') + '" data-act="replaced" data-key="' + ev.key + '" data-on="' + (ev.replaced ? '0' : '1') + '"' + (S.evBusy ? ' disabled' : '') + '>' +
+      (ev.replaced ? '置き換え済みを外す' : 'アプリ版に置き換え済みにする') + '</button></div>';
     // 種類・会場の手直し（アプリ側だけに保存。カレンダーには書かない）
     h += '<div class="ev-meta"><h4>種類・会場を直す</h4>' +
       '<label>種類 <select name="type" data-keep="type:' + ev.key + '"><option value="">自動（' + esc(ev.typeAuto) + '）</option>' +
@@ -1775,7 +2225,7 @@
     var rows = p.days.map(function (d) {
       var md = (+d.date.slice(5, 7)) + '/' + (+d.date.slice(8, 10)) + '(' + d.weekday + ')';
       var before = d.before ? d.before.status + (d.before.note ? ' ' + d.before.note : '') : '未入力';
-      return '<tr><td>' + esc(md) + '</td><td class="muted">' + esc(before) + '</td><td class="to">' + esc(d.status) + '</td><td>' + esc(d.note) + '</td></tr>';
+      return '<tr><td>' + esc(md) + '</td><td class="muted">' + esc(before) + '</td><td class="to">' + esc(d.status || '未入力に戻す') + '</td><td>' + esc(d.note) + '</td></tr>';
     }).join('');
     var foot;
     if (t.pstate === 'pending') {
@@ -1837,11 +2287,12 @@
   function renderAll() {
     if (!S.me || !S.uiReady || S.dead) return;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === S.tab); });
-    ['mine', 'all', 'events', 'roles', 'staff', 'ai'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
+    ['mine', 'all', 'plan', 'events', 'roles', 'staff', 'ai'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
     renderMonthLabels();
     renderMine();
     renderGrid();
     renderEvents();
+    renderPlan();
     renderRolesTable();
     renderSaveState();
     renderAsOf();
