@@ -382,7 +382,7 @@
         // URL が無効化・再発行された。前回の内容も消して、何も出さない
         dropLocalCache();
         S.dead = true;
-        ['tabs', 'tab-mine', 'tab-all', 'tab-events', 'tab-roles', 'tab-staff', 'tab-ai', 'staleBanner', 'errorBanner'].forEach(hide);
+        ['tabs', 'tab-mine', 'tab-all', 'tab-plan', 'tab-events', 'tab-roles', 'tab-staff', 'tab-ai', 'staleBanner', 'errorBanner'].forEach(hide);
         byId('asOf').textContent = '';
         return fatal('このURLは使えません。管理者に新しいURLをもらってください。');
       }
@@ -400,6 +400,7 @@
     var el = byId('fatal');
     el.textContent = msg;
     el.hidden = false;
+    applyAppName();   // 使えないURLなら中立の名前に戻す
   }
 
   // ================================================================ 家族の画面（v11〜）
@@ -2284,7 +2285,21 @@
     if (!banner.hidden) byId('errorText').textContent = '保存できませんでした：' + S.error;
   }
 
+  /**
+   * アプリの名前（v15〜）：家族URLは「MIC 予定」、スタッフ・管理者URLは「MIC スタッフ予定」。
+   * URLの種類が分かるまで（読み込み中・使えないURL）は中立の「MIC 予定」のまま（index.html の初期値）
+   */
+  var APP_NAME_NEUTRAL = 'MIC 予定';
+  function applyAppName() {
+    var name = !S.me || S.dead ? APP_NAME_NEUTRAL : S.family ? 'MIC 予定' : 'MIC スタッフ予定';
+    byId('appTitle').textContent = name;
+    if (document.title !== name) document.title = name;
+    var m = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (m) m.setAttribute('content', name);
+  }
+
   function renderAll() {
+    applyAppName();
     if (!S.me || !S.uiReady || S.dead) return;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === S.tab); });
     ['mine', 'all', 'plan', 'events', 'roles', 'staff', 'ai'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
