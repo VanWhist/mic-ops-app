@@ -77,7 +77,9 @@
       var e = S.events[m];
       if (e && e.data && e.at) events[m] = { data: e.data, at: e.at };
     });
-    var boot = { me: S.me, staff: S.staff, roles: S.roles, availability: S.avail, period: S.period, venues: S.venues };
+    var boot = S.family
+      ? { me: S.meOrig, staff: [], athletes: S.athletes, myAthletes: S.myAthletes, athleteAvailability: S.avail, period: S.period }
+      : { me: S.me, staff: S.staff, roles: S.roles, availability: S.avail, period: S.period, venues: S.venues, athletes: S.athletes, athleteAvailability: S.aAvail };
     try { localStorage.setItem(cacheKey, JSON.stringify({ savedAt: Date.now(), bootAt: S.bootAt, boot: boot, events: events })); }
     catch (e) { /* 容量不足などでも、キャッシュなしで動く */ }
   }
@@ -89,6 +91,8 @@
 
   /** bootstrap の結果を画面の状態へ入れる。fetchStart 以降に保存した自分の日・役割は手元の値を残す */
   function applyBoot(r, fetchStart) {
+    if (r.me && r.me.isFamily) return applyFamilyBoot(r, fetchStart);
+    S.athletes = r.athletes || []; S.aAvail = r.athleteAvailability || {};
     var fresh = r.availability || {};
     var meId = r.me && r.me.staffId;
     if (fetchStart && meId && S.avail[meId]) {
@@ -102,6 +106,49 @@
     var roles = r.roles || {};
     if (fetchStart && meId && S.rolesSavedAt >= fetchStart && S.roles[meId]) roles[meId] = S.roles[meId];
     S.me = r.me; S.staff = r.staff; S.roles = roles; S.avail = fresh; S.period = r.period; S.venues = r.venues || [];
+  }
+
+  /**
+   * 家族（v11〜）：選手を「人」として、スタッフ画面と同じ入力・一覧のしくみに載せる。
+   *   S.staff ＝ 全選手（一覧の行）、S.avail ＝ 選手の○△×、S.me.staffId ＝ いま入力している選手（タブで切り替え）
+   * ★ 書けるのは自分の家族の選手だけ（サーバーで判定）。保存待ちがある間は選手を切り替えない
+   */
+  function applyFamilyBoot(r, fetchStart) {
+    var fresh = r.athleteAvailability || {};
+    if (fetchStart && S.family) {
+      // 取得中に保存した日は手元の値を残す（自分の家族の選手の分）
+      (S.myAthletes || []).forEach(function (id) {
+        var oldM = S.avail[id];
+        if (!oldM) return;
+        var newM = fresh[id] || (fresh[id] = {});
+        Object.keys(S.savedAt).forEach(function (d) {
+          if (S.savedAt[d] < fetchStart) return;
+          if (oldM[d]) newM[d] = oldM[d]; else delete newM[d];
+        });
+      });
+    }
+    S.family = true;
+    S.meOrig = r.me;
+    S.athletes = r.athletes || [];
+    S.myAthletes = (r.myAthletes || []).filter(function (id) { return S.athletes.some(function (a) { return a.athleteId === id; }); });
+    if (S.myAthletes.indexOf(S.curAthlete) < 0) S.curAthlete = S.myAthletes[0] || null;
+    S.staff = S.athletes.map(function (a) { return { staffId: a.athleteId, name: a.name, familyId: a.familyId }; });
+    S.avail = fresh; S.roles = {}; S.venues = []; S.period = r.period;
+    S.me = Object.assign({}, r.me, { staffId: S.curAthlete });
+  }
+
+  /** 家族：入力する選手を切り替える（保存待ちがあれば先に保存する） */
+  function switchAthlete(id) {
+    if (id === S.curAthlete) return;
+    if (S.inflight || pendingCount()) {
+      flush().then(function () { if (!pendingCount() && !S.inflight) switchAthlete(id); });
+      return;
+    }
+    S.curAthlete = id;
+    S.me.staffId = id;
+    S.noteDates = [];
+    S.rangeStart = null;
+    renderAll();
   }
 
   /** 入力中（文字入力・プルダウン）は描き直さず、終わってから描く */
@@ -236,10 +283,15 @@
     S.inflight = true;
     S.error = null;
     renderSaveState();
-    return api('saveDays', { days: days }).then(function (r) {
-      var mine = S.avail[S.me.staffId] || (S.avail[S.me.staffId] = {});
+    // 家族は選手を指定する（「兄弟にも同じ印」なら兄弟全員）。スタッフは本人の分（サーバーがトークンで決める）
+    var payload = S.family ? { days: days, athleteIds: S.sibAll ? S.myAthletes.slice() : [S.me.staffId] } : { days: days };
+    return api('saveDays', payload).then(function (r) {
+      var ids = r.athleteIds || [S.me.staffId];
       r.saved.forEach(function (x) {
-        if (x.status) mine[x.date] = { s: x.status, n: x.note || '' }; else delete mine[x.date];
+        ids.forEach(function (id) {
+          var m = S.avail[id] || (S.avail[id] = {});
+          if (x.status) m[x.date] = { s: x.status, n: x.note || '' }; else delete m[x.date];
+        });
         S.savedAt[x.date] = Date.now();
         var p = S.pending[x.date];
         if (p && p.s === x.status && p.n === (x.note || '')) delete S.pending[x.date];   // 送信中に変えた日は残す
@@ -295,13 +347,15 @@
     S.month = months.indexOf(t) >= 0 ? t : months[0];
     S.tab = S.me.isAdmin ? 'events' : 'mine';
     hide('loading');
-    byId('who').textContent = S.me.isAdmin ? '管理者' : S.me.name + 'さん';
+    byId('who').textContent = S.me.isAdmin ? '管理者' : S.family ? S.me.name : S.me.name + 'さん';
+    if (S.family) setupFamilyUI();
     setupTabs();
     setupMine();
     setupAll();
     setupRoles();
     setupEvents();
     setupStaffAdmin();
+    setupFamilyAdmin();
     setupAi();
     setupCalSync();
     renderAll();
@@ -343,6 +397,41 @@
     el.hidden = false;
   }
 
+  // ================================================================ 家族の画面（v11〜）
+
+  function setupFamilyUI() {
+    // タブ：入力・みんなの予定・練習会など（役割・スタッフ管理・AI は出さない）
+    var label = { mine: '予定を入力', all: 'みんなの予定', events: '練習会など' };
+    document.querySelectorAll('.tab').forEach(function (b) {
+      if (label[b.dataset.tab]) b.textContent = label[b.dataset.tab];
+    });
+    // ペンの言葉：選手は「参加／不参加」
+    var penLabel = { '○': '参加', '×': '不参加' };
+    document.querySelectorAll('.pen').forEach(function (b) {
+      if (penLabel[b.dataset.pen]) b.innerHTML = '<b>' + b.dataset.pen + '</b>' + penLabel[b.dataset.pen];
+    });
+    byId('noteWarn').innerHTML = '備考は<strong>全員（ほかの家族・スタッフ）に見えます</strong>。個人的な事情は書かず、「午後のみ」「10時から」のように書いてください。';
+    byId('athTabs').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-ath]');
+      if (b) switchAthlete(b.dataset.ath);
+    });
+    byId('sibAll').addEventListener('change', function (e) { S.sibAll = e.target.checked; renderMine(); });
+    document.querySelector('#tab-events .hint').textContent = 'これからの練習会・合宿・大会と、○・△の人です（○△×は「予定を入力」で入れます）。';
+    document.querySelector('#tab-all .hint').textContent = '全選手の○△×です（見るだけ）。日付をタップすると、その日の○・△の人を表示します。';
+  }
+
+  function renderAthTabs() {
+    if (!S.family) return;
+    var many = S.myAthletes.length > 1;
+    var tabs = byId('athTabs');
+    tabs.hidden = !many;
+    byId('sibWrap').hidden = !many;
+    tabs.innerHTML = S.myAthletes.map(function (id) {
+      var a = S.staff.filter(function (x) { return x.staffId === id; })[0];
+      return '<button type="button" class="ath-tab' + (id === S.curAthlete ? ' on' : '') + '" data-ath="' + esc(id) + '">' + esc(a ? a.name : id) + '</button>';
+    }).join('');
+  }
+
   // ================================================================ タブ
 
   function setupTabs() {
@@ -351,12 +440,13 @@
     nav.querySelectorAll('.tab').forEach(function (b) {
       if (S.me.isAdmin && b.dataset.tab === 'mine') b.hidden = true;
       if (b.dataset.tab === 'staff') b.hidden = !S.me.isAdmin;
-      if (b.dataset.tab === 'ai') b.hidden = false;
+      if (b.dataset.tab === 'ai') b.hidden = !!S.family;
+      if (b.dataset.tab === 'roles' && S.family) b.hidden = true;
       b.addEventListener('click', function () {
         S.tab = b.dataset.tab;
         renderAll();
         if (S.tab === 'events') loadEvents(S.month);
-        if (S.tab === 'staff') loadStaffAdmin();
+        if (S.tab === 'staff') { loadStaffAdmin(); loadFamilies(); }
         if (S.tab === 'ai') loadAiSuggestions();
       });
     });
@@ -460,6 +550,12 @@
   function renderMine() {
     if (S.me.isAdmin) return;
     renderMonthLabels();
+    renderAthTabs();
+    if (S.family && !S.curAthlete) {
+      byId('cal').innerHTML = '';
+      byId('mineSummary').textContent = '選手がまだ登録されていません。管理者に連絡してください。';
+      return;
+    }
     document.querySelectorAll('.pen').forEach(function (b) {
       var on = b.dataset.pen === S.pen;
       b.classList.toggle('on', on);
@@ -473,9 +569,10 @@
       el.classList.toggle('now', el.dataset.step === (S.rangeStart ? '2' : '1'));
       el.classList.toggle('done', el.dataset.step === '1' && !!S.rangeStart);
     });
-    var PEN_NAME = { '○': '行ける', '△': '条件付き', '×': '行けない' };
+    var PEN_NAME = S.family ? { '○': '参加', '△': '条件付き', '×': '不参加' } : { '○': '行ける', '△': '条件付き', '×': '行けない' };
+    var who = S.family ? esc(nameOf(S.curAthlete)) + (S.sibAll ? 'と兄弟' : '') + 'の' : '';
     byId('penNow').innerHTML = S.pen
-      ? '<span class="mk ' + STATUS_CLASS[S.pen] + '">' + S.pen + '</span>（' + PEN_NAME[S.pen] + '）を入力中' + (S.range ? '・期間でまとめて' : '')
+      ? who + '<span class="mk ' + STATUS_CLASS[S.pen] + '">' + S.pen + '</span>（' + PEN_NAME[S.pen] + '）を入力中' + (S.range ? '・期間でまとめて' : '')
       : '<span class="mk s-n">消</span>消す（未回答に戻す）を入力中' + (S.range ? '・期間でまとめて' : '');
 
     var cal = byId('cal');
@@ -521,6 +618,14 @@
 
   function setupAll() {
     byId('weekendOnly').addEventListener('change', function (e) { S.weekendOnly = e.target.checked; renderAll(); });
+    // スタッフ・管理者：「選手」に切り替えると、選手の○△×を見られる（見るだけ）
+    byId('allView').hidden = !!S.family;
+    byId('allView').addEventListener('change', function (e) {
+      if (e.target.name !== 'allView') return;
+      S.allView = e.target.value;
+      S.selectedDay = null;
+      renderAll();
+    });
     byId('grid').addEventListener('click', function (e) {
       var th = e.target.closest('[data-day]');
       if (!th) return;
@@ -536,14 +641,26 @@
     btn.disabled = true;
     btn.textContent = '読み込み中…';
     api('bootstrap').then(function (r) {
-      S.staff = r.staff; S.roles = r.roles || {}; S.avail = r.availability || {};
+      applyBoot(r);
       btn.textContent = '最新にする';
     }, function (e) {
       btn.textContent = '読み込めませんでした（もう一度）';
     }).then(function () { btn.disabled = false; renderAll(); });
   }
 
+  /** みんなの予定の行：スタッフ（家族の画面では選手）か、スタッフ・管理者が「選手」を選んだときの選手 */
+  function gridAthletes() { return !S.family && S.allView === 'athletes'; }
+  function gridRows() {
+    return gridAthletes() ? (S.athletes || []).map(function (a) { return { staffId: a.athleteId, name: a.name }; }) : S.staff;
+  }
+  function gridVal(id, d) {
+    if (!gridAthletes()) return valueOf(id, d);
+    var m = (S.aAvail || {})[id];
+    return (m && m[d]) || { s: '', n: '' };
+  }
+
   function renderGrid() {
+    var rows = gridRows();
     var today = todayJst();
     var days = daysOf(S.month).filter(function (d) { return !S.weekendOnly || isOff(d) || d === today; });
     var h = '<thead><tr><th class="corner">' + (+S.month.slice(5, 7)) + '月</th>';
@@ -554,11 +671,11 @@
         parts(d)[2] + '<small>' + WD[w] + '</small></button></th>';
     });
     h += '</tr></thead><tbody>';
-    S.staff.forEach(function (st) {
-      var self = S.me.staffId === st.staffId;
+    rows.forEach(function (st) {
+      var self = !gridAthletes() && S.me.staffId === st.staffId;
       h += '<tr' + (self ? ' class="self"' : '') + '><th class="nm">' + esc(st.name) + '</th>';
       days.forEach(function (d) {
-        var v = valueOf(st.staffId, d);
+        var v = gridVal(st.staffId, d);
         h += '<td class="' + STATUS_CLASS[v.s] + (S.selectedDay === d ? ' sel' : '') + (d === today ? ' today' : '') + '"' + (v.n ? ' title="' + esc(v.n) + '"' : '') + '>' +
           esc(v.s) + (v.n ? '<i class="nd"></i>' : '') + '</td>';
       });
@@ -566,11 +683,12 @@
     });
     h += '</tbody><tfoot><tr><th class="nm">○の人数</th>';
     days.forEach(function (d) {
-      var n = S.staff.filter(function (st) { return valueOf(st.staffId, d).s === '○'; }).length;
+      var n = rows.filter(function (st) { return gridVal(st.staffId, d).s === '○'; }).length;
       h += '<td>' + n + '</td>';
     });
     h += '</tr></tfoot>';
-    byId('grid').innerHTML = days.length ? h : '<tbody><tr><td>この月に表示する日がありません</td></tr></tbody>';
+    byId('grid').innerHTML = !rows.length ? '<tbody><tr><td>' + (gridAthletes() || S.family ? '選手がまだ登録されていません' : '') + '</td></tr></tbody>'
+      : days.length ? h : '<tbody><tr><td>この月に表示する日がありません</td></tr></tbody>';
     renderDayDetail();
   }
 
@@ -579,9 +697,23 @@
     var d = S.selectedDay;
     if (!d || d.slice(0, 7) !== S.month) { el.hidden = true; return; }
     var by = { '○': [], '△': [], '×': [], '': [] };
-    S.staff.forEach(function (st) { by[valueOf(st.staffId, d).s].push(st); });
+    var rows = gridRows();
+    rows.forEach(function (st) { by[gridVal(st.staffId, d).s].push(st); });
 
     var h = '<h3>' + longDate(d) + '</h3>';
+    if (S.family || gridAthletes()) {
+      // 選手：○・△（備考）・×・未回答を並べるだけ（役割は無い）
+      h += '<h4><span class="mk s-o">○</span> 参加 ' + by['○'].length + '人</h4>' + (by['○'].length ? '<p>' + by['○'].map(function (st) { return esc(st.name); }).join('、') + '</p>' : '');
+      h += '<h4><span class="mk s-t">△</span> 条件付き ' + by['△'].length + '人</h4>' + (by['△'].length ? '<ul class="plain">' + by['△'].map(function (st) {
+        var n = gridVal(st.staffId, d).n;
+        return '<li>' + esc(st.name) + (n ? '：' + esc(n) : '') + '</li>';
+      }).join('') + '</ul>' : '');
+      h += '<h4><span class="mk s-x">×</span> 不参加 ' + by['×'].length + '人</h4>' + (by['×'].length ? '<p>' + by['×'].map(function (st) { return esc(st.name); }).join('、') + '</p>' : '');
+      h += '<h4><span class="mk s-n"></span> 未回答 ' + by[''].length + '人</h4>' + (by[''].length ? '<p>' + by[''].map(function (st) { return esc(st.name); }).join('、') + '</p>' : '');
+      el.innerHTML = h;
+      el.hidden = false;
+      return;
+    }
     h += '<h4><span class="mk s-o">○</span> 行ける人 ' + by['○'].length + '人</h4>';
     if (by['○'].length) {
       h += '<dl class="by-role">';
@@ -618,7 +750,7 @@
 
   function setupRoles() {
     var form = byId('rolesForm');
-    if (S.me.isAdmin) return;
+    if (S.me.isAdmin || S.family) return;
     form.hidden = false;
     fillRolesForm();
     form.addEventListener('change', function () {
@@ -973,8 +1105,13 @@
     }
     byId('evOrphans').innerHTML = oh;
 
-    if (!data.events.length) { byId('evList').innerHTML = '<p class="muted">この月の予定はありません。</p>'; return; }
-    byId('evList').innerHTML = data.events.map(renderEventCard).join('');
+    var list = data.events;
+    if (S.family) {   // 家族は「これから」の予定だけ
+      var today = todayJst();
+      list = list.filter(function (ev) { return ev.dates[ev.dates.length - 1] >= today; });
+    }
+    if (!list.length) { byId('evList').innerHTML = '<p class="muted">' + (S.family ? 'この月のこれからの練習会・合宿・大会はありません。' : 'この月の予定はありません。') + '</p>'; return; }
+    byId('evList').innerHTML = list.map(renderEventCard).join('');
     // 選んだだけでまだ保存していないプルダウンは、描き直しても選んだ値のままにする
     byId('evList').querySelectorAll('select[data-keep]').forEach(function (sel) {
       var v = S.selKeep[sel.dataset.keep];
@@ -1001,9 +1138,10 @@
       '<h3 class="ev-title">' + esc(ev.title) + '</h3>' +
       (ev.location ? '<div class="ev-loc">' + esc(ev.location) + '</div>' : '') +
       '<div class="badges">' + badges + '</div>' +
-      (absent
+      (S.family ? '' : absent
         ? '<div class="ev-assigned ev-absent">不在：' + (ev.absentees && ev.absentees.length ? ev.absentees.map(function (id) { return '<b>' + esc(nameOf(id)) + '</b>'; }).join('・') + (ev.absentFixed ? '✎' : '') : '<span class="muted">（未定）</span>') + '</div>'
-        : '<div class="ev-assigned">担当：' + assigned + '</div>');
+        : '<div class="ev-assigned">担当：' + assigned + '</div>') +
+      participantsHtml(ev);
     if (S.me.isAdmin) {
       h += '<button type="button" class="ev-open' + (open ? ' is-open' : '') + '" data-act="open" data-key="' + ev.key + '">' +
         (open ? '閉じる ▴' : absent
@@ -1012,6 +1150,17 @@
       if (open) h += renderEventDetail(ev);
     }
     return h + '</article>';
+  }
+
+  /** 参加選手（練習会・合宿・大会）：「参加 ○2名（A・B）／一部 1名（C）／△ 1名（D）」 */
+  function participantsHtml(ev) {
+    var p = ev.participants;
+    if (!p) return '';
+    var nm = function (x) { return esc(x.name); };
+    var parts = ['<span class="mk s-o">○</span>' + (p.days > 1 ? '全日' : '') + p.full.length + '名' + (p.full.length ? '（' + p.full.map(nm).join('・') + '）' : '')];
+    if (p.partial.length) parts.push('一部' + p.partial.length + '名（' + p.partial.map(function (x) { return nm(x) + ' ' + x.o + '/' + p.days + '日'; }).join('・') + '）');
+    if (p.maybe.length) parts.push('<span class="mk s-t">△</span>' + p.maybe.length + '名（' + p.maybe.map(function (x) { return nm(x) + (x.note ? '：' + esc(x.note) : ''); }).join('・') + '）');
+    return '<div class="ev-part">参加：' + parts.join('／') + '</div>';
   }
 
   function renderEventDetail(ev) {
@@ -1156,6 +1305,98 @@
       location.reload();
     });
     byId('hideUrl').addEventListener('click', hideUrl);
+  }
+
+  // ---------------------------------------------------------------- 家族・選手の管理（v11〜・管理者だけ）
+
+  function setupFamilyAdmin() {
+    if (!S.me.isAdmin) return;
+    byId('famList').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-fam]');
+      if (!b || b.disabled || S.famBusy) return;
+      var act = b.dataset.fam, fid = b.dataset.id, name = b.dataset.name;
+      if (act === 'url') famOp('familyUrl', { familyId: fid }, function (r) { showUrl(name + 'のURL（この家族にだけ送ってください）', r.token); });
+      else if (act === 'reissue') {
+        if (!window.confirm(name + 'のURLを再発行します。\n今のURLはすぐ使えなくなります。よろしいですか？')) return;
+        famOp('familyReissue', { familyId: fid }, function (r) { showUrl(name + 'の新しいURL（古いURLはもう使えません。この家族にだけ送ってください）', r.token); });
+      } else if (act === 'disable' || act === 'enable') {
+        var on = act === 'enable';
+        if (!on && !window.confirm(name + 'のURLを無効にします。\nすぐ使えなくなり、この家族の選手はみんなの予定・参加者に出なくなります（入力済みの予定は消えません）。よろしいですか？')) return;
+        famOp('familySetActive', { familyId: fid, active: on }, function () { hideUrl(); });
+      } else if (act === 'add-ath') {
+        var input = b.closest('li').querySelector('input[name="athName"]');
+        var nm = input.value.trim();
+        if (!nm) { setFamStatus('ng', '選手の氏名を入れてください'); return; }
+        famOp('athleteAdd', { familyId: fid, name: nm });
+      } else if (act === 'rename-ath') {
+        var nn = window.prompt('選手の氏名（表示用）', name);
+        if (nn == null || !nn.trim() || nn.trim() === name) return;
+        famOp('athleteRename', { athleteId: b.dataset.ath, name: nn.trim() });
+      } else if (act === 'ath-off' || act === 'ath-on') {
+        if (act === 'ath-off' && !window.confirm(name + 'さんを無効にします（入力済みの予定は消えません）。よろしいですか？')) return;
+        famOp('athleteSetActive', { athleteId: b.dataset.ath, active: act === 'ath-on' });
+      }
+    });
+    byId('addFamilyBtn').addEventListener('click', function () {
+      var name = byId('newFamily').value.trim();
+      if (!name) { setFamStatus('ng', '家族の表示名を入れてください（例：有賀家）'); return; }
+      famOp('familyAdd', { name: name }, function (r) {
+        byId('newFamily').value = '';
+        showUrl(name + '（' + r.familyId + '）を追加しました。続けて選手を追加してから、URLをこの家族にだけ送ってください', r.token);
+      });
+    });
+  }
+
+  function setFamStatus(kind, text) {
+    var el = byId('famStatus');
+    el.textContent = text;
+    el.className = 'ev-status ' + kind;
+  }
+
+  function loadFamilies() {
+    if (!S.me.isAdmin) return;
+    api('familyList').then(function (r) { S.families = r.families; setFamStatus('', ''); }, function (e) {
+      setFamStatus('ng', /不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : '⚠ 読み込めませんでした：' + e.message);
+    }).then(renderFamilies);
+  }
+
+  function famOp(action, payload, done) {
+    S.famBusy = true;
+    setFamStatus('busy', '保存中…');
+    renderFamilies();
+    api(action, payload).then(function (r) {
+      if (r.families) S.families = r.families;
+      setFamStatus('ok', '✓ ' + (action === 'familyUrl' ? 'URLを表示しました' : '保存しました'));
+      if (done) done(r);
+      if (action !== 'familyUrl') refreshBoot();   // 選手の一覧・参加者にも出す
+    }, function (e) {
+      setFamStatus('ng', '⚠ できませんでした：' + e.message);
+    }).then(function () { S.famBusy = false; renderFamilies(); });
+  }
+
+  function renderFamilies() {
+    if (!S.me || !S.me.isAdmin) return;
+    var list = S.families || [];
+    var dis = S.famBusy ? ' disabled' : '';
+    byId('addFamilyBtn').disabled = !!S.famBusy;
+    byId('famList').innerHTML = list.length ? list.map(function (f) {
+      var nm = esc(f.name), id = esc(f.familyId);
+      var aths = f.athletes.map(function (a) {
+        var an = esc(a.name);
+        return '<li class="' + (a.active ? '' : 'inactive') + '"><span>' + an + '<small>' + esc(a.athleteId) + '</small></span>' +
+          '<button type="button" class="mini ghost" data-fam="rename-ath" data-id="' + id + '" data-ath="' + esc(a.athleteId) + '" data-name="' + an + '"' + dis + '>名前を直す</button>' +
+          (a.active ? '<button type="button" class="mini ghost" data-fam="ath-off" data-id="' + id + '" data-ath="' + esc(a.athleteId) + '" data-name="' + an + '"' + dis + '>無効</button>'
+            : '<button type="button" class="mini" data-fam="ath-on" data-id="' + id + '" data-ath="' + esc(a.athleteId) + '" data-name="' + an + '"' + dis + '>有効に戻す</button>') + '</li>';
+      }).join('');
+      return '<li class="fam ' + (f.active ? '' : 'inactive') + '"><div class="who"><b>' + nm + '</b><small>' + id + '</small>' +
+        '<span class="badge ' + (f.active ? 'venue' : 'novenue') + '">' + (f.active ? '有効' : '無効') + '</span></div>' +
+        '<div class="acts">' + (f.active ? '<button type="button" class="mini" data-fam="url" data-id="' + id + '" data-name="' + nm + '"' + dis + '>URLを表示</button>' : '') +
+        '<button type="button" class="mini" data-fam="reissue" data-id="' + id + '" data-name="' + nm + '"' + dis + '>再発行</button>' +
+        (f.active ? '<button type="button" class="mini ghost" data-fam="disable" data-id="' + id + '" data-name="' + nm + '"' + dis + '>無効にする</button>'
+          : '<button type="button" class="mini" data-fam="enable" data-id="' + id + '" data-name="' + nm + '"' + dis + '>有効に戻す</button>') + '</div>' +
+        '<ul class="ath-list">' + (aths || '<li class="muted">選手がまだいません</li>') + '</ul>' +
+        '<div class="note-row"><input name="athName" type="text" maxlength="20" placeholder="選手の氏名" autocomplete="off"><button type="button" data-fam="add-ath" data-id="' + id + '"' + dis + '>選手を追加</button></div></li>';
+    }).join('') : '<li class="muted">家族はまだ登録されていません</li>';
   }
 
   function showUrl(label, t) {
