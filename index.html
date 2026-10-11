@@ -34,6 +34,7 @@
 <nav id="tabs" class="tabs" hidden>
   <button type="button" data-tab="mine" class="tab">自分の予定</button>
   <button type="button" data-tab="all" class="tab">みんなの予定</button>
+  <button type="button" data-tab="plan" class="tab" hidden>計画</button>
   <button type="button" data-tab="events" class="tab">予定と担当</button>
   <button type="button" data-tab="roles" class="tab">役割の希望</button>
   <button type="button" data-tab="staff" class="tab" hidden>スタッフ管理</button>
@@ -69,7 +70,7 @@
       <button type="button" class="pen" data-pen="○" role="radio"><b>○</b>行ける</button>
       <button type="button" class="pen" data-pen="△" role="radio"><b>△</b>条件付き</button>
       <button type="button" class="pen" data-pen="×" role="radio"><b>×</b>行けない</button>
-      <button type="button" class="pen" data-pen="" role="radio"><b>消</b>未回答</button>
+      <button type="button" class="pen" data-pen="" role="radio" aria-label="消す（未入力に戻す）"><b>消</b>未入力に戻す</button>
     </div>
     <label class="range-toggle"><input type="checkbox" id="rangeMode"> 期間でまとめて塗る</label>
     <div id="rangeSteps" class="range-steps" hidden>
@@ -118,6 +119,27 @@
     <div id="dayDetail" class="day-detail" hidden></div>
   </section>
 
+  <!-- 計画（管理者だけ・v14〜）：空きを見たまま期間を選び、予定を作って担当を決める -->
+  <section id="tab-plan" class="panel" hidden>
+    <div class="all-tools">
+      <span id="plStatus" class="ev-status" role="status" aria-live="polite"></span>
+      <button type="button" id="plReload" class="link-btn">最新にする</button>
+    </div>
+    <div id="plMain">
+      <div class="month-nav">
+        <button type="button" class="prev" aria-label="前の月">‹</button>
+        <span class="month-label"></span>
+        <button type="button" class="next" aria-label="次の月">›</button>
+      </div>
+      <p class="pl-legend"><span>ス＝スタッフ・選＝選手（○の人数／人数）</span>
+        <span class="band b-cal">既存カレンダー</span><span class="band b-app">アプリの予定</span><span class="band b-app b-draft">下書き</span></p>
+      <div class="cal-head"><span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span></div>
+      <div id="plCal" class="cal pl-cal"></div>
+      <div id="plDetail"></div>
+    </div>
+    <div id="plEditor" hidden></div>
+  </section>
+
   <!-- 予定と担当 -->
   <section id="tab-events" class="panel" hidden>
     <div class="month-nav">
@@ -129,7 +151,7 @@
       <span id="evStatus" class="ev-status" role="status" aria-live="polite"></span>
       <button type="button" id="evReload" class="link-btn">最新にする</button>
     </div>
-    <p class="hint">予定は「MICスケジュール」「MICレッスン」から読んでいます（読むだけ）。</p>
+    <p class="hint">予定は「MICスケジュール」「MICレッスン」から読んでいます（読むだけ）。管理者が「計画」で作った予定（アプリの予定）も出ます。</p>
     <!-- 管理者だけ：アプリ専用カレンダー「MIC 予定（アプリ）」への反映と、Deacon の指導日 -->
     <div id="calBar" class="cal-bar" hidden>
       <div class="cal-bar-row">
@@ -204,11 +226,11 @@
     </div>
     <div id="aiHintAdmin" hidden>
       <p class="hint">予定・空き状況・担当について質問すると、AIがこのアプリのデータを読んで答えます。<strong>答えは間違うことがあります。</strong>担当を決める前に、画面でも確かめてください。</p>
-      <p class="hint">城さんの○△×だけは「12月の冬休み合宿を城△にして」のように頼めます。AIは変更案を出すだけで、<strong>［この内容で保存］を押したときだけ保存</strong>されます（ほかの人・担当は変えられません）。</p>
+      <p class="hint">城さんの○△×だけは「12月の冬休み合宿を城△にして」「12/27の印を消して」のように頼めます。AIは変更案を出すだけで、<strong>［この内容で保存］を押したときだけ保存</strong>されます（ほかの人・担当は変えられません）。</p>
     </div>
     <div id="aiHintStaff" hidden>
       <p class="hint">予定・空き状況・担当について質問すると、AIがこのアプリのデータを読んで答えます。<strong>答えは間違うことがあります。</strong></p>
-      <p class="hint">自分の○△×だけ頼めます。保存は［この内容で保存］を押したときだけ。できないことや改善の提案は城さんに知らされます</p>
+      <p class="hint">自分の○△×だけ頼めます（印を消して未入力に戻すのも可）。保存は［この内容で保存］を押したときだけ。できないことや改善の提案は城さんに知らされます</p>
     </div>
     <div id="aiExamples" class="ai-examples">
       <button type="button" class="chip">11/7に空いている人は？</button>
