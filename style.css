@@ -331,3 +331,17 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .ath-list li { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 14px; }
 .ath-list li > span { flex: 1; }
 .ath-list li.inactive > span { color: var(--muted); text-decoration: line-through; }
+
+/* 参加の回答（v12〜） */
+.ev-ans { margin-top: 2px; }
+.ask-box { border: 2px solid var(--accent); border-radius: 10px; padding: 8px 10px; margin-bottom: 12px; background: #f3f7ff; }
+.ask-box h3, .up-h { font-size: 16px; margin: 4px 0; }
+.ev.ask { margin-bottom: 8px; }
+.ans { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.ans-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ans-name { min-width: 5em; font-weight: 700; font-size: 14px; }
+.ans-all .ans-name { font-weight: 400; color: var(--muted); }
+.ans-btn { min-height: 44px; padding: 6px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); font-size: 15px; }
+.ans-btn.yes.on { background: var(--o); color: #fff; border-color: var(--o); font-weight: 700; }
+.ans-btn.no.on { background: #6b7280; color: #fff; border-color: #6b7280; font-weight: 700; }
+.ans-btn:disabled { opacity: .5; }
