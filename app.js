@@ -80,7 +80,9 @@
     var boot = S.family
       ? { me: S.meOrig, staff: [], athletes: S.athletes, myAthletes: S.myAthletes, athleteAvailability: S.avail, period: S.period }
       : { me: S.me, staff: S.staff, roles: S.roles, availability: S.avail, period: S.period, venues: S.venues, athletes: S.athletes, athleteAvailability: S.aAvail };
-    try { localStorage.setItem(cacheKey, JSON.stringify({ savedAt: Date.now(), bootAt: S.bootAt, boot: boot, events: events })); }
+    var store = { savedAt: Date.now(), bootAt: S.bootAt, boot: boot, events: events };
+    if (S.inEv) store.inEv = S.inEv;   // 「自分の予定」に出す合宿・大会（v13〜）
+    try { localStorage.setItem(cacheKey, JSON.stringify(store)); }
     catch (e) { /* 容量不足などでも、キャッシュなしで動く */ }
   }
 
@@ -332,6 +334,7 @@
         applyBoot(c.boot);
         S.bootAt = c.bootAt; S.fromCache = true;
         Object.keys(c.events || {}).forEach(function (m) { S.events[m] = { status: 'cached', data: c.events[m].data, at: c.events[m].at }; });
+        if (c.inEv && typeof c.inEv === 'object') S.inEv = c.inEv;
         initUI();
         window.__micopsCacheShownAt = performance.now();   // 計測用
       }
@@ -554,6 +557,52 @@
     scheduleFlush(0);
   }
 
+  // ---------------------------------------------------------------- 「自分の予定」に合宿・大会（v13〜）
+  // settings の events_on_input に入っている人だけ（いまは城さん S001）。タイトルと日付だけ（説明文は受け取らない）
+
+  function loadInputEvents(month) {
+    S.inEv = S.inEv || {};
+    S.inEvAsked = S.inEvAsked || {};
+    if (S.inEvAsked[month]) return;   // この画面を開いている間は月ごとに1回（サーバー側は10分キャッシュ）
+    S.inEvAsked[month] = true;
+    api('inputEvents', { month: month }).then(function (r) {
+      S.inEv[month] = r.events || [];
+      saveCache();
+      if (S.month === month) renderMine();
+    }, function () { S.inEvAsked[month] = false; /* 出せなくても入力には影響させない */ });
+  }
+
+  /** 日付 → その日の合宿・大会（合宿・大会の順。前の月から続く行事も、その月に読んだ分で出す） */
+  function inputEventsByDay() {
+    var out = {};
+    if (!S.me.eventsOnInput || !S.inEv) return out;
+    var seen = {};
+    Object.keys(S.inEv).forEach(function (m) {
+      (S.inEv[m] || []).forEach(function (ev) {
+        if (seen[ev.key]) return;
+        seen[ev.key] = true;
+        ev.dates.forEach(function (d) { (out[d] = out[d] || []).push(ev); });
+      });
+    });
+    return out;
+  }
+
+  /** マスの中は短く：先頭の（仮）などは外す（一覧には元のタイトルを出す） */
+  function shortTitle(t) {
+    return String(t).replace(/^[（(]仮[）)]\s*/, '').replace(/\s+/g, '');
+  }
+
+  function renderInputEventList() {
+    var box = byId('inEvList');
+    var list = (S.me.eventsOnInput && S.inEv && S.inEv[S.month]) || [];
+    box.hidden = !list.length;
+    box.innerHTML = list.length ? '<span class="lbl">この月の合宿・大会</span>' + list.map(function (ev) {
+      var a = ev.dates[0], b = ev.dates[ev.dates.length - 1];
+      return '<span class="item"><span class="sw ' + (ev.type === '大会' ? 'ev-comp' : 'ev-camp') + '">' + esc(ev.type) + '</span>' +
+        esc(md(a) + (b !== a ? '〜' + md(b) : '')) + ' ' + esc(ev.title) + '</span>';
+    }).join('') : '';
+  }
+
   function renderMine() {
     if (S.me.isAdmin) return;
     renderMonthLabels();
@@ -587,6 +636,7 @@
     var html = '';
     for (var i = 0; i < weekday(days[0]); i++) html += '<span class="blank"></span>';
     var today = todayJst();
+    var evDay = inputEventsByDay();
     days.forEach(function (d) {
       var v = valueOf(S.me.staffId, d);
       var w = weekday(d);
@@ -596,12 +646,18 @@
       if (S.failed[d]) cls.push('failed');
       if (S.rangeStart === d) cls.push('range-start');
       if (d === today) cls.push('today');
-      var label = longDate(d) + ' ' + (v.s || '未回答') + (v.n ? ' ' + v.n : '');
+      var evs = evDay[d] || [];
+      if (evs.length) cls.push('has-ev');
+      var label = longDate(d) + ' ' + (v.s || '未回答') + (v.n ? ' ' + v.n : '') + evs.map(function (e) { return '（' + e.type + '：' + e.title + '）'; }).join('');
       html += '<button type="button" class="' + cls.join(' ') + '" data-date="' + d + '" aria-label="' + esc(label) + '">' +
         '<span class="dn">' + parts(d)[2] + '</span><span class="mk">' + esc(v.s) + '</span>' +
-        (v.n ? '<span class="nd" aria-hidden="true"></span>' : '') + '</button>';
+        (v.n ? '<span class="nd" aria-hidden="true"></span>' : '') +
+        (evs.length ? '<span class="dev ' + (evs[0].type === '大会' ? 'ev-comp' : 'ev-camp') + '" aria-hidden="true">' + esc(shortTitle(evs[0].title)) + (evs.length > 1 ? '+' + (evs.length - 1) : '') + '</span>' : '') +
+        '</button>';
     });
     cal.innerHTML = html;
+    renderInputEventList();
+    if (S.me.eventsOnInput) loadInputEvents(S.month);
 
     var np = byId('notePanel');
     var noteDates = S.noteDates.filter(function (d) { return valueOf(S.me.staffId, d).s === '△'; });
