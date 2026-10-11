@@ -316,3 +316,18 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .absent-pick { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 14px; }
 .absent-pick legend { font-size: 13px; color: var(--muted); }
 .absent-pick label { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; }
+
+/* 選手・保護者（v11〜） */
+.ath-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 6px; }
+.ath-tab { min-height: 44px; padding: 6px 14px; border: 1px solid var(--accent); color: var(--accent); background: var(--card); border-radius: 999px; font-size: 15px; }
+.ath-tab.on { background: var(--accent); color: #fff; font-weight: 700; }
+.all-view { display: flex; gap: 16px; font-size: 15px; margin: 4px 0; }
+.all-view label { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; }
+.ev-part { font-size: 14px; margin-top: 4px; }
+.families-admin { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 8px; }
+.families-admin h3 { font-size: 15px; margin: 0 0 6px; }
+.families-admin .fam { flex-direction: column; align-items: stretch; }
+.ath-list { list-style: none; margin: 6px 0; padding: 0 0 0 8px; }
+.ath-list li { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 14px; }
+.ath-list li > span { flex: 1; }
+.ath-list li.inactive > span { color: var(--muted); text-decoration: line-through; }

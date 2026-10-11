@@ -62,6 +62,9 @@
       <button type="button" class="next" aria-label="次の月">›</button>
     </div>
 
+    <!-- 家族だけ：選手ごとのタブと「兄弟にも同じ印」 -->
+    <div id="athTabs" class="ath-tabs" hidden></div>
+    <label id="sibWrap" class="range-toggle" hidden><input type="checkbox" id="sibAll"> 兄弟にも同じ印をつける</label>
     <div class="pens" role="radiogroup" aria-label="付ける印">
       <button type="button" class="pen" data-pen="○" role="radio"><b>○</b>行ける</button>
       <button type="button" class="pen" data-pen="△" role="radio"><b>△</b>条件付き</button>
@@ -83,7 +86,7 @@
 
     <div id="notePanel" class="note-panel" hidden>
       <label for="noteInput" id="noteLabel"></label>
-      <p class="note-warn">備考は<strong>スタッフ全員に見えます</strong>。個人的な事情は書かず、「午後のみ」「10時から」のように書いてください。</p>
+      <p class="note-warn" id="noteWarn">備考は<strong>スタッフ全員に見えます</strong>。個人的な事情は書かず、「午後のみ」「10時から」のように書いてください。</p>
       <div class="note-row">
         <input id="noteInput" type="text" maxlength="100" placeholder="例：午後のみ" autocomplete="off">
         <button id="noteSave" type="button">備考を保存</button>
@@ -99,6 +102,10 @@
       <button type="button" class="prev" aria-label="前の月">‹</button>
       <span class="month-label"></span>
       <button type="button" class="next" aria-label="次の月">›</button>
+    </div>
+    <div id="allView" class="all-view" hidden role="radiogroup" aria-label="表示する人">
+      <label><input type="radio" name="allView" value="staff" checked> スタッフ</label>
+      <label><input type="radio" name="allView" value="athletes"> 選手</label>
     </div>
     <div class="all-tools">
       <label><input type="checkbox" id="weekendOnly" checked> 土日祝だけ表示</label>
@@ -167,6 +174,17 @@
       <div class="note-row">
         <input id="newName" type="text" maxlength="20" placeholder="表示名（例：姓）" autocomplete="off">
         <button id="addStaffBtn" type="button">追加</button>
+      </div>
+    </div>
+    <!-- 家族・選手（v11〜）。家族URLは家族単位で、その家族にだけ送る -->
+    <div class="families-admin">
+      <h3>家族・選手</h3>
+      <p class="hint">家族URLは<strong>その家族にだけ</strong>送ってください。家族は自分の家族の選手の○△×だけ入力でき、全選手の○△×・備考と練習会・合宿・大会を見られます。</p>
+      <div id="famStatus" class="ev-status" role="status" aria-live="polite"></div>
+      <ul id="famList" class="staff-list"></ul>
+      <div class="note-row">
+        <input id="newFamily" type="text" maxlength="20" placeholder="家族の表示名（例：有賀家）" autocomplete="off">
+        <button id="addFamilyBtn" type="button">家族を追加</button>
       </div>
     </div>
     <div class="admin-url">
