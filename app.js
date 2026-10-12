@@ -2309,7 +2309,11 @@
   // ★ 変更案は表示するだけ。［反映］で案のIDだけを送り、サーバーが置いた案を保存する。
   //   新しい案が出たら、前の未保存の案はボタンを消す（古い案を押し間違えないように）。
   // ★ 家族の案は2種類：○△×（athAvail）と参加の回答（answer）。変えられるのは自分の家族の選手だけ（サーバーで判定）。
-  // ★ スマホでは下から出る大きめの画面、PC（幅700px以上）では右下の小窓。キーボードが出たら入力欄の上まで縮める。
+  // ★ 大きさは2段階（v19〜）：まず小さめ（スマホは画面下の4割ほど、PCは右下の小窓）で開き、後ろの画面は暗くせずそのまま使える。
+  //   ［大きくする］で画面いっぱい、［小さくする］で戻す。最後に選んだ大きさは、その端末だけに覚える（localStorage）。
+  //   キーボードが出たら、見えている高さに合わせて縮め、入力欄と［送る］を隠さない。
+  // ★ 音声入力（v19〜）：ブラウザの音声認識（ja-JP）で、話した言葉を入力欄に入れるだけ。送るのは［送る］を押したとき。
+  //   使えないブラウザではマイクボタンを出さず、キーボードのマイクで話せることを出す。
 
   var AI_TIMEOUT_MS = 120000;   // Claude を何回か呼ぶので、ふつうの操作より長く待つ
   var AI_EXAMPLES = {
@@ -2363,6 +2367,9 @@
       renderAi();
     });
     byId('aiFab').addEventListener('click', function () { openAi(true); });
+    byId('aiSize').addEventListener('click', function () { setAiSize(S.aiSize === 'large' ? 'small' : 'large', true); });
+    setAiSize(loadAiSize(), false);
+    setupMic();
     byId('aiClose').addEventListener('click', function () { openAi(false); });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && !byId('aiPanel').hidden) openAi(false);
@@ -2375,6 +2382,27 @@
     byId('aiFab').hidden = false;
     document.body.classList.add('has-ai');   // 右下のボタンが大事なボタンを隠さないよう、ページの下に余白を取る
     renderAi();
+  }
+
+  var AI_SIZE_KEY = 'mic_ai_size';   // 最後に選んだ大きさ（small／large）。会話は保存しない
+  function loadAiSize() {
+    try { return localStorage.getItem(AI_SIZE_KEY) === 'large' ? 'large' : 'small'; } catch (e) { return 'small'; }
+  }
+
+  function setAiSize(size, remember) {
+    S.aiSize = size === 'large' ? 'large' : 'small';
+    var large = S.aiSize === 'large';
+    byId('aiPanel').setAttribute('data-size', S.aiSize);
+    document.body.classList.toggle('ai-large', large);
+    var b = byId('aiSize'), label = large ? '小さくする' : '大きくする';
+    b.setAttribute('aria-label', label);
+    b.title = label;
+    b.querySelector('.ai-size-ic').textContent = large ? '⤡' : '⤢';
+    b.querySelector('.ai-size-tx').textContent = label;
+    if (remember) { try { localStorage.setItem(AI_SIZE_KEY, S.aiSize); } catch (e) { /* 覚えられなくても動く */ } }
+    fitAiPanel();
+    var body = byId('aiBody');
+    if (S.ai && S.ai.length && !byId('aiPanel').hidden) body.scrollTop = body.scrollHeight;
   }
 
   function openAi(on) {
@@ -2390,12 +2418,13 @@
       // スマホでは開いただけでキーボードを出さない（会話を読めるように）。PCは入力欄へ
       if (window.matchMedia && window.matchMedia('(min-width: 700px)').matches) byId('aiInput').focus();
     } else {
+      stopMic();
       fab.focus();
     }
   }
 
   /**
-   * キーボードが出たら、見えている高さ（visualViewport）に合わせて画面を縮め、入力欄が隠れないようにする。
+   * キーボードが出たら、見えている高さ（visualViewport）に合わせて画面を縮め、入力欄と［送る］が隠れないようにする（小さい・大きいの両方）。
    * Android の Chrome は interactive-widget=resizes-content で画面ごと縮むので、ここでは何もしなくてよい
    */
   function fitAiPanel() {
@@ -2403,16 +2432,95 @@
     if (!p || p.hidden) return;
     var vv = window.visualViewport;
     var wide = window.matchMedia && window.matchMedia('(min-width: 700px)').matches;
-    if (!vv || wide) { p.style.bottom = ''; p.style.height = ''; return; }
+    p.style.bottom = ''; p.style.height = ''; p.style.top = '';
+    if (!vv || wide) return;
     var kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-    if (kb < 60) { p.style.bottom = ''; p.style.height = ''; return; }   // キーボードが出ていない
+    if (kb < 60) return;   // キーボードが出ていない
+    var room = Math.round(vv.height);
+    p.style.top = 'auto';
     p.style.bottom = kb + 'px';
-    p.style.height = Math.max(200, Math.round(vv.height - 8)) + 'px';
+    // 大きい：見えている高さ全部。小さい：今の高さのまま、入りきらなければ見えている高さまで
+    p.style.height = (S.aiSize === 'large' ? room : Math.min(p.getBoundingClientRect().height, room - 8)) + 'px';
+  }
+
+  // ---------------------------------------------------------------- 音声入力（v19〜）
+
+  function speechApi() { return window.SpeechRecognition || window.webkitSpeechRecognition || null; }
+
+  function setupMic() {
+    var mic = byId('aiMic');
+    if (!speechApi()) {
+      mic.hidden = true;
+      micStatus('このブラウザでは音声入力ボタンは使えません。キーボードのマイクで話して入力できます', 'note');
+      return;
+    }
+    mic.hidden = false;
+    mic.addEventListener('click', function () { if (S.mic) stopMic(); else startMic(); });
+  }
+
+  function micStatus(text, kind) {
+    var el = byId('aiMicStatus');
+    el.textContent = text || '';
+    el.className = 'ai-mic-status' + (kind ? ' ' + kind : '');
+    el.hidden = !text;
+  }
+
+  function startMic() {
+    var Rec = speechApi();
+    if (!Rec || S.aiBusy) return;
+    var rec;
+    try { rec = new Rec(); } catch (e) { micStatus('音声入力を始められませんでした', 'ng'); return; }
+    var input = byId('aiInput');
+    var base = input.value.trim();
+    rec.lang = 'ja-JP';
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = function (e) {
+      var text = '';
+      for (var i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+      input.value = (base ? base + ' ' : '') + text.trim();   // 入力欄に入れるだけ。送らない
+    };
+    rec.onerror = function (e) {
+      var err = e && e.error;
+      S.micErr = err === 'not-allowed' || err === 'service-not-allowed'
+        ? 'マイクが許可されていません。ブラウザ（iPhone は「設定」→ Safari →「マイク」）でこのページのマイクを許可してから、もう一度押してください'
+        : err === 'no-speech' ? '声が聞き取れませんでした。もう一度マイクを押して話してください'
+          : err === 'audio-capture' ? 'マイクが見つかりませんでした'
+            : err === 'aborted' ? '' : '音声入力が使えませんでした（' + (err || '不明') + '）。キーボードのマイクでも話せます';
+    };
+    rec.onend = function () {
+      if (S.mic !== rec) return;
+      S.mic = null;
+      renderMic();
+      if (S.micErr) micStatus(S.micErr, 'ng');
+      else micStatus(input.value.trim() ? '文字を確かめてから［送る］を押してください' : '', '');
+    };
+    S.micErr = '';
+    S.mic = rec;
+    renderMic();
+    micStatus('聞いています…（もう一度押すと止まります）', 'on');
+    try { rec.start(); } catch (e) { S.mic = null; renderMic(); micStatus('音声入力を始められませんでした', 'ng'); }
+  }
+
+  function stopMic() {
+    var rec = S.mic;
+    if (!rec) return;
+    try { rec.stop(); } catch (e) { /* もう止まっている */ }
+  }
+
+  function renderMic() {
+    var b = byId('aiMic');
+    var on = !!S.mic;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.setAttribute('aria-label', on ? '音声入力を止める' : '音声で入力');
   }
 
   function askAi(text) {
     var q = String(text || '').trim();
     if (!q || S.aiBusy) return;
+    stopMic();
     var history = S.ai.filter(function (t) { return t.a && !t.error; }).slice(-3).map(function (t) { return { q: t.q, a: t.a }; });
     var turn = { q: q, a: '', busy: true };
     S.ai.push(turn);

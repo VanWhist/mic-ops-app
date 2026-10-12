@@ -262,7 +262,10 @@
 <section id="aiPanel" class="ai-panel" role="dialog" aria-modal="false" aria-labelledby="aiTitle" hidden>
   <div class="ai-head">
     <h2 id="aiTitle">AIアシスタント</h2>
-    <button id="aiClose" type="button" class="ai-close" aria-label="閉じる">×</button>
+    <div class="ai-head-btns">
+      <button id="aiSize" type="button" class="ai-size" aria-label="大きくする" title="大きくする"><span class="ai-size-ic" aria-hidden="true">⤢</span><span class="ai-size-tx">大きくする</span></button>
+      <button id="aiClose" type="button" class="ai-close" aria-label="閉じる">×</button>
+    </div>
   </div>
   <div id="aiBody" class="ai-body">
     <p id="aiWarn" class="ai-warn">AIは間違えることがあります。反映する前に内容を確かめてください。やり取りの要約が、改善のため管理者（城）に届くことがあります</p>
@@ -284,8 +287,10 @@
   <div class="ai-foot">
     <form id="aiForm" class="ai-form">
       <input id="aiInput" type="text" maxlength="300" placeholder="質問を入力" autocomplete="off" enterkeyhint="send" aria-label="AIへの質問">
+      <button id="aiMic" type="button" class="ai-mic" hidden aria-label="音声で入力" aria-pressed="false"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg></button>
       <button id="aiSend" type="submit">送る</button>
     </form>
+    <p id="aiMicStatus" class="ai-mic-status" role="status" aria-live="polite" hidden></p>
     <div class="ai-meta">
       <span id="aiUsage" class="ev-status" role="status"></span>
       <button type="button" id="aiClear" class="link-btn">会話を消す</button>
