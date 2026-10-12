@@ -361,6 +361,7 @@
     setupPlan();
     setupStaffAdmin();
     setupFamilyAdmin();
+    setupLodgingAdmin();
     setupAi();
     setupCalSync();
     renderAll();
@@ -491,7 +492,7 @@
         S.tab = b.dataset.tab;
         renderAll();
         if (S.tab === 'events') { if (S.family) S.ansMsg = null; loadEvents(S.month, !!S.family); }   // 家族は開くたびに最新の受付・回答を読む
-        if (S.tab === 'staff') { loadStaffAdmin(); loadFamilies(); loadAiSuggestions(); }
+        if (S.tab === 'staff') { loadStaffAdmin(); loadFamilies(); loadAiSuggestions(); loadLodgings(); }
         if (S.tab === 'plan') renderPlan();
       });
     });
@@ -1070,6 +1071,11 @@
   }
 
   function setupEvents() {
+    // 宿泊の回答・コピー（v21〜）：家族・スタッフ・管理者で共通
+    byId('tab-events').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-lg]');
+      if (b && !b.disabled) lgClick(b);
+    });
     byId('evReload').addEventListener('click', function () {
       // 空き状況・役割も読み直す（担当の人が×に変えたかの警告は、これを元に出している）。
       // 管理者はカレンダーも読み直す（サーバー側の10分キャッシュを使わない）
@@ -1343,6 +1349,7 @@
         h += '<div class="ans">' + ids.map(function (id) { return answerBlock(ev, id); }).join('') + '</div>';
       }
     }
+    if (!asking) h += lodgingHtml(ev);   // 宿泊（v21〜）。「参加しますか？」の欄には出さない（一覧のほうで答える）
     return h + '</article>';
   }
 
@@ -1731,8 +1738,10 @@
       id: ev.appId, status: ev.appStatus, type: ev.type, name: ev.title, venue: ev.venue || '',
       startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1], allDay: ev.allDay,
       startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', assign: assign, people: (ev.absentees || []).slice(),
-      partial: ev.answers ? ev.answers.partial : undefined
+      partial: ev.answers ? ev.answers.partial : undefined,
+      lodging: ev.lodging ? { on: true, lodgingId: ev.lodging.id, nights: ev.lodging.nights.slice(), deadline: ev.lodging.deadline || '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }) } : undefined
     });
+    if (!S.lodgings) loadLodgings(function () { if (S.plan.ed) renderPlanEditor(); });
   }
   /** 置き換え済みも含めて探す（予定と担当から開くとき） */
   function planEventsAll() {
@@ -1770,6 +1779,7 @@
 
   function planChange(e) {
     var t = e.target, p = S.plan;
+    if (planLodgingChange(t)) return;   // 宿泊（v21〜）
     if (t.name === 'plView') { p.view = t.value; renderPlan(); return; }
     if (t.dataset.pd) {
       var v = t.value;
@@ -1793,6 +1803,7 @@
     if (f === 'startDate' || f === 'endDate') {
       if (!inPeriodDate(ed[f])) ed[f] = f === 'startDate' ? p.start : (p.end || p.start);
       if (ed.endDate < ed.startDate) { if (f === 'startDate') ed.endDate = ed.startDate; else ed.startDate = ed.endDate; }
+      lgFitNights(ed);
     }
     if (f === 'type' || f === 'allDay' || f === 'startDate' || f === 'endDate') renderPlanEditor();
   }
@@ -1842,6 +1853,7 @@
             }).join('') + '</span></li>';
         }).join('') + '</ul>';
     }
+    h += planLodgingHtml(ed);   // 宿泊（v21〜）。担当の下に置く
     // ボタン
     var dis = p.busy ? ' disabled' : '';
     h += '<div class="pl-acts">';
@@ -1885,6 +1897,8 @@
       status: status, memo: ed.memo, assignments: ed.type === '不在' ? [] : assignments, people: ed.type === '不在' ? ed.people : []
     };
     if (PARTIAL_DEFAULT.hasOwnProperty(ed.type)) body.partial = planPartial(ed);
+    try { var lgBody = planLodgingBody(ed); } catch (err) { p.msg = { kind: 'ng', text: '⚠ ' + err.message }; renderPlan(); return; }
+    if (lgBody !== undefined) body.lodging = lgBody;
     var label = status === '下書き' ? '下書きで保存しました' : status === '中止' ? '中止にしました' : '確定しました';
     planOp('saveAppEvent', body, label, status === '確定');
   }
@@ -1936,7 +1950,7 @@
       (S.family ? '' : absent
         ? '<div class="ev-assigned ev-absent">不在：' + (ev.absentees && ev.absentees.length ? ev.absentees.map(function (id) { return '<b>' + esc(nameOf(id)) + '</b>'; }).join('・') + (ev.absentFixed ? '✎' : '') : '<span class="muted">（未定）</span>') + '</div>'
         : '<div class="ev-assigned">担当：' + assigned + '</div>') +
-      participantsHtml(ev);
+      participantsHtml(ev) + lodgingHtml(ev);
     if (S.me.isAdmin) {
       h += '<button type="button" class="ev-open' + (open ? ' is-open' : '') + '" data-act="open" data-key="' + ev.key + '">' +
         (open ? '閉じる ▴' : absent
@@ -2300,6 +2314,351 @@
     }).join('');
     byId('addStaffBtn').disabled = !!S.stBusy;
     byId('reissueAdminBtn').disabled = !!S.stBusy;
+  }
+
+  // ================================================================ 宿泊の出欠（v21〜・城さん決定 2026-10-12）
+  //
+  // ★ 宿泊があるのはアプリの予定（計画タブ）の練習会・合宿・大会。予定カードに宿の情報と夜ごとの回答欄を出す
+  // ★ 家族は自分の家族の選手の分、スタッフは自分の分を答える。管理者は夜ごとの集計（名前・食事）と「宿に伝える内容をコピー」
+  // ★ ［泊まる］を選ぶと、宿に食事があれば食事を「要」にしておく（変えられる）。［宿泊の回答を保存］で保存。締切を過ぎたら見るだけ
+  // ★ 料金の計算・集金、カレンダーへの反映、Haiku君による入力の代行はしない
+  // ★ 未回答（城さん確定 2026-10-12）：管理者は夜ごとに名前、スタッフは人数だけ。宿に伝えるコピーには入れない
+
+  var LG_STAYS = ['泊まる', '泊まらない', '未定'];
+
+  function lgDate(d) { var p = parts(d); return p[1] + '/' + p[2] + '(' + WD[weekday(d)] + ')'; }
+
+  /** 回答の下書き（無ければ保存済みの回答から作る）。key＝予定のキー、who＝選手ID か 'me'（スタッフ） */
+  function lgDraft(ev, who) {
+    S.lgDraft = S.lgDraft || {};
+    var k = ev.key + '|' + who;
+    if (!S.lgDraft[k]) {
+      var saved = who === 'me' ? ev.lodging.mine : (ev.lodging.mine || {})[who];
+      var dr = {};
+      Object.keys(saved || {}).forEach(function (n) { var v = saved[n]; dr[n] = { s: v.s || '', d: v.d || '', b: v.b || '' }; });
+      S.lgDraft[k] = dr;
+    }
+    return S.lgDraft[k];
+  }
+
+  function lgDirty(ev, who) {
+    var dr = S.lgDraft && S.lgDraft[ev.key + '|' + who];
+    if (!dr) return false;
+    var saved = (who === 'me' ? ev.lodging.mine : (ev.lodging.mine || {})[who]) || {};
+    return ev.lodging.nights.some(function (n) {
+      var a = dr[n] || {}, b = saved[n] || {};
+      return (a.s || '') !== (b.s || '') || (a.d || '') !== (b.d || '') || (a.b || '') !== (b.b || '');
+    });
+  }
+
+  /** 予定カードの宿泊の欄。家族・スタッフ・管理者で中身が違う（サーバーが見える範囲に絞って返している） */
+  function lodgingHtml(ev) {
+    var l = ev.lodging;
+    if (!l) return '';
+    var meals = [l.dinner ? '夕食あり' : '', l.breakfast ? '朝食あり' : ''].filter(Boolean).join('・') || '食事なし';
+    var h = '<section class="lg" data-key="' + esc(ev.key) + '"><h4 class="lg-h">宿泊：' + esc(l.name) + ' <small>（' + esc(l.kind) + '・' + meals + '）</small></h4>';
+    if (l.address) h += '<div class="lg-info">' + esc(l.address) + '</div>';
+    if (l.priceMemo) h += '<div class="lg-info">料金：' + esc(l.priceMemo) + '</div>';
+    h += '<div class="lg-info">泊まる夜：' + l.nights.map(function (n) { return lgDate(n) + (ev.dates.indexOf(n) < 0 ? '（前泊）' : ''); }).join('・') + '</div>';
+    if (l.deadline) h += '<div class="lg-info ' + (l.closed ? 'lg-closed' : 'lg-due') + '">' + (l.closed ? '回答の締切（' + lgDate(l.deadline) + '）を過ぎました。変えたいときは城さんに連絡してください' : '回答の締切：' + lgDate(l.deadline)) + '</div>';
+    if (S.me.isAdmin) {
+      if (l.memo) h += '<div class="lg-info lg-memo">宿のメモ（管理者だけ）：' + esc(l.memo) + '</div>';
+      h += lgSummaryHtml(l, true) + '<button type="button" class="mini" data-lg="copy" data-key="' + esc(ev.key) + '">宿に伝える内容をコピー</button>';
+    } else if (S.family) {
+      h += S.myAthletes.map(function (id) { return lgForm(ev, id, nameOf(id)); }).join('');
+    } else {
+      h += lgSummaryHtml(l, false) + lgForm(ev, 'me', '自分');
+    }
+    return h + '</section>';
+  }
+
+  /** 夜ごとの集計。管理者は食事つきの名前・未定・泊まらない、スタッフは人数と名前 */
+  function lgSummaryHtml(l, admin) {
+    return '<ul class="lg-sum">' + l.summary.map(function (s) {
+      var line = '<b>' + lgDate(s.night) + 'の夜</b>：泊' + (s.athletes + s.staff) + '名（選手' + s.athletes + '・スタッフ' + s.staff + '）' +
+        (l.dinner ? '／夕食' + s.dinner : '') + (l.breakfast ? '／朝食' + s.breakfast : '');
+      var names = s.stay.map(function (p) {
+        var m = admin ? [p.dinner ? '夕' : '', p.breakfast ? '朝' : ''].filter(Boolean).join('') : '';
+        return esc(p.name) + (m ? '<small>（' + m + '）</small>' : '');
+      });
+      var more = '';
+      if (admin) {
+        if (s.maybe.length) more += '<div class="lg-more">未定：' + s.maybe.map(function (p) { return esc(p.name); }).join('・') + '</div>';
+        if (s.no.length) more += '<div class="lg-more">泊まらない：' + s.no.map(function (p) { return esc(p.name); }).join('・') + '</div>';
+        // 未回答：その夜の当日か翌日に参加する（選手は参加の回答が終日・時間、スタッフは担当）のに、宿泊の回答がない人
+        if (s.unanswered && s.unanswered.length) more += '<div class="lg-more lg-unans">未回答：' + s.unanswered.map(function (p) { return esc(p.name); }).join('・') + '</div>';
+      } else if (s.unansweredCount) more += '<div class="lg-more lg-unans">未回答' + s.unansweredCount + '名</div>';   // スタッフは人数だけ
+      return '<li>' + line + (names.length ? '<div class="lg-names">' + names.join('・') + '</div>' : '') + more + '</li>';
+    }).join('') + '</ul>';
+  }
+
+  /** 1人分の回答欄（夜ごとに 泊まる／泊まらない／未定、食事の要・不要） */
+  function lgForm(ev, who, label) {
+    var l = ev.lodging;
+    var dr = lgDraft(ev, who);
+    var dis = l.closed || S.lgBusy ? ' disabled' : '';
+    var attrs = ' data-key="' + esc(ev.key) + '" data-who="' + esc(who) + '"';
+    var dirty = lgDirty(ev, who);
+    var h = '<div class="lg-form' + (dirty ? ' dirty' : '') + '"' + attrs + '><div class="lg-who">' + esc(label) + 'の宿泊</div>';
+    l.nights.forEach(function (n) {
+      var v = dr[n] || {};
+      h += '<div class="lg-night"><span class="lg-date">' + lgDate(n) + 'の夜</span><span class="lg-btns">' + LG_STAYS.map(function (st) {
+        return '<button type="button" class="lg-btn' + (v.s === st ? ' on' : '') + '" data-lg="stay" data-night="' + n + '" data-v="' + st + '" aria-pressed="' + (v.s === st) + '"' + attrs + dis + '>' + st + '</button>';
+      }).join('') + '</span>';
+      if (v.s === '泊まる' && (l.dinner || l.breakfast)) {
+        h += '<span class="lg-meals">' +
+          (l.dinner ? '<button type="button" class="lg-meal' + (v.d === '要' ? ' on' : '') + '" data-lg="meal" data-m="d" data-night="' + n + '" aria-pressed="' + (v.d === '要') + '"' + attrs + dis + '>夕食 ' + (v.d === '要' ? '要' : '不要') + '</button>' : '') +
+          (l.breakfast ? '<button type="button" class="lg-meal' + (v.b === '要' ? ' on' : '') + '" data-lg="meal" data-m="b" data-night="' + n + '" aria-pressed="' + (v.b === '要') + '"' + attrs + dis + '>翌朝食 ' + (v.b === '要' ? '要' : '不要') + '</button>' : '') +
+          '</span>';
+      }
+      h += '</div>';
+    });
+    if (!l.closed) {
+      h += '<p class="lg-unsaved" role="status"' + (dirty ? '' : ' hidden') + '>まだ保存していません。［宿泊の回答を保存］を押してください</p>' +
+        '<button type="button" class="lg-save" data-lg="save"' + attrs + dis + '>宿泊の回答を保存</button>';
+    }
+    return h + '</div>';
+  }
+
+  function lgEvent(key) {
+    var list = S.family ? ((S.upcoming && S.upcoming.data && S.upcoming.data.events) || []) : (((S.events[S.month] || {}).data || {}).events || []);
+    return list.filter(function (x) { return x.key === key; })[0];
+  }
+
+  function lgRerender() { if (S.family) renderUpcoming(); else renderEvents(); }
+
+  function lgClick(b) {
+    var act = b.dataset.lg, key = b.dataset.key;
+    var ev = lgEvent(key);
+    if (!ev || !ev.lodging) return;
+    if (act === 'copy') { lgCopy(ev); return; }
+    if (S.lgBusy || ev.lodging.closed) return;
+    var who = b.dataset.who, dr = lgDraft(ev, who), n = b.dataset.night;
+    if (act === 'stay') {
+      var v = dr[n] = dr[n] || {};
+      v.s = b.dataset.v;
+      // 泊まるなら、宿に食事があれば「要」にしておく。泊まらない・未定なら食事は空
+      v.d = v.s === '泊まる' && ev.lodging.dinner ? (v.d || '要') : '';
+      v.b = v.s === '泊まる' && ev.lodging.breakfast ? (v.b || '要') : '';
+      lgRerender();
+    } else if (act === 'meal') {
+      var m = dr[n];
+      if (!m || m.s !== '泊まる') return;
+      m[b.dataset.m] = m[b.dataset.m] === '要' ? '不要' : '要';
+      lgRerender();
+    } else if (act === 'save') {
+      lgSave(ev, who);
+    }
+  }
+
+  function lgSave(ev, who) {
+    var dr = lgDraft(ev, who);
+    var nights = ev.lodging.nights.filter(function (n) { return dr[n] && dr[n].s; }).map(function (n) {
+      return { night: n, stay: dr[n].s, dinner: dr[n].d || '', breakfast: dr[n].b || '' };
+    });
+    if (!nights.length) { lgMsg('ng', '⚠ 泊まる・泊まらない・未定を選んでください'); return; }
+    // スタッフは今見ている月（カードはその月の予定から出している）、家族は予定の最初の日の月
+    var month = S.family ? ev.dates.filter(inPeriod)[0].slice(0, 7) : S.month;
+    var body = { month: month, eventKey: ev.key, nights: nights };
+    if (who !== 'me') body.athleteIds = [who];
+    S.lgBusy = true;
+    lgMsg('busy', '保存中…');
+    api('lodgingAnswer', body).then(function (r) {
+      if (S.family) S.upcoming = { status: 'ok', data: r };
+      else S.events[month] = { status: 'ok', data: r, at: Date.now() };
+      delete S.lgDraft[ev.key + '|' + who];
+      lgMsg('ok', '✓ ' + ev.title + '：' + (who === 'me' ? '' : nameOf(who) + 'の') + '宿泊の回答を保存しました');
+    }, function (e) {
+      lgMsg('ng', '⚠ 保存できませんでした：' + (/不明な操作|使えません/.test(e.message) && e.code !== 'bad_request' ? 'サーバー側（Apps Script）がまだ古い版です' : e.message));
+    }).then(function () { S.lgBusy = false; lgRerender(); });
+  }
+
+  function lgMsg(kind, text) {
+    if (S.family) S.ansMsg = { kind: kind, text: text };
+    else S.evMsg = { kind: kind, text: text };
+    lgRerender();
+  }
+
+  /** 管理者：宿に伝える内容（夜ごとの人数・食事と名前）をコピー */
+  function lgCopyText(ev) {
+    var l = ev.lodging;
+    var lines = ['【' + ev.title + '】' + l.name];
+    l.summary.forEach(function (s) {
+      lines.push(lgDate(s.night) + '泊：' + (s.athletes + s.staff) + '名（選手' + s.athletes + '・スタッフ' + s.staff + '）' +
+        (l.dinner ? '　夕食' + s.dinner + '名' : '') + (l.breakfast ? '　翌朝食' + s.breakfast + '名' : ''));
+      if (s.stay.length) lines.push('　' + s.stay.map(function (p) {
+        var m = [l.dinner ? (p.dinner ? '夕○' : '夕×') : '', l.breakfast ? (p.breakfast ? '朝○' : '朝×') : ''].filter(Boolean).join('');
+        return p.name + (m ? '（' + m + '）' : '');
+      }).join('、'));
+    });
+    return lines.join('\n');
+  }
+
+  function lgCopy(ev) {
+    var text = lgCopyText(ev);
+    S.lgCopied = text;
+    var done = function () { S.evMsg = { kind: 'ok', text: '✓ 宿に伝える内容をコピーしました' }; renderEvents(); };
+    var fallback = function () {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      if (ok) done(); else { S.evMsg = { kind: 'ng', text: 'コピーできませんでした。内容：' + text }; renderEvents(); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+    else fallback();
+  }
+
+  // ---------------------------------------------------------------- 宿のマスタ（管理者・「管理」タブ）
+
+  var LG_EMPTY = { id: '', name: '', kind: '拠点', address: '', priceMemo: '', dinner: true, breakfast: true, memo: '', active: true };
+
+  function setupLodgingAdmin() {
+    if (!S.me.isAdmin) return;
+    S.lgForm = Object.assign({}, LG_EMPTY);
+    byId('lgAdmin').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-lga]');
+      if (!b || b.disabled || S.lgaBusy) return;
+      var act = b.dataset.lga;
+      if (act === 'edit') {
+        var x = (S.lodgings || []).filter(function (l) { return l.id === b.dataset.id; })[0];
+        if (x) { S.lgForm = Object.assign({}, x); renderLodgingAdmin(); byId('lgAdmin').querySelector('.lga-form').scrollIntoView({ block: 'nearest' }); }
+      } else if (act === 'new') { S.lgForm = Object.assign({}, LG_EMPTY); renderLodgingAdmin(); }
+      else if (act === 'save') lgAdminSave(S.lgForm);
+      else if (act === 'toggle') {
+        var y = (S.lodgings || []).filter(function (l) { return l.id === b.dataset.id; })[0];
+        if (y) lgAdminSave(Object.assign({}, y, { active: !y.active }));
+      }
+    });
+    byId('lgAdmin').addEventListener('input', lgAdminInput);
+    byId('lgAdmin').addEventListener('change', lgAdminInput);
+  }
+
+  function lgAdminInput(e) {
+    var f = e.target.dataset && e.target.dataset.lgf;
+    if (!f) return;
+    S.lgForm[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+  }
+
+  function loadLodgings(then) {
+    if (!S.me || !S.me.isAdmin) return;
+    api('lodgingList').then(function (r) { S.lodgings = r.lodgings; S.lgaMsg = null; }, function (e) {
+      S.lgaMsg = { kind: 'ng', text: '⚠ 宿を読み込めませんでした：' + (/不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message) };
+    }).then(function () { renderLodgingAdmin(); if (then) then(); });
+  }
+
+  function lgAdminSave(x) {
+    if (!String(x.name || '').trim()) { S.lgaMsg = { kind: 'ng', text: '⚠ 宿の名前を入れてください' }; renderLodgingAdmin(); return; }
+    S.lgaBusy = true;
+    S.lgaMsg = { kind: 'busy', text: '保存中…' };
+    renderLodgingAdmin();
+    api('lodgingSave', { lodging: x }).then(function (r) {
+      S.lodgings = r.lodgings;
+      S.lgForm = Object.assign({}, LG_EMPTY);
+      S.lgaMsg = { kind: 'ok', text: '✓ ' + x.name + 'を保存しました' };
+    }, function (e) { S.lgaMsg = { kind: 'ng', text: '⚠ 保存できませんでした：' + e.message }; })
+      .then(function () { S.lgaBusy = false; renderLodgingAdmin(); });
+  }
+
+  function renderLodgingAdmin() {
+    var box = byId('lgAdmin');
+    if (!box || !S.me || !S.me.isAdmin) return;
+    var f = S.lgForm || LG_EMPTY, dis = S.lgaBusy ? ' disabled' : '';
+    var h = '<h3>宿（宿泊の出欠）</h3><p class="hint">白馬の拠点などをここで登録しておくと、計画タブの予定の編集で選べます。大会の宿は予定の編集から新しく登録することもできます（ここにも残ります）。料金の計算はしません。</p>';
+    if (S.lgaMsg) h += '<p class="ev-status ' + S.lgaMsg.kind + '">' + esc(S.lgaMsg.text) + '</p>';
+    h += '<ul class="staff-list lga-list">' + (S.lodgings || []).map(function (l) {
+      return '<li class="' + (l.active ? '' : 'off') + '"><span class="nm">' + esc(l.name) + ' <small>（' + esc(l.kind) + (l.dinner ? '・夕食あり' : '') + (l.breakfast ? '・朝食あり' : '') + (l.active ? '' : '・無効') + '）</small></span>' +
+        '<button type="button" class="mini" data-lga="edit" data-id="' + esc(l.id) + '"' + dis + '>直す</button>' +
+        '<button type="button" class="mini ghost" data-lga="toggle" data-id="' + esc(l.id) + '"' + dis + '>' + (l.active ? '無効にする' : '有効に戻す') + '</button></li>';
+    }).join('') + (S.lodgings && !S.lodgings.length ? '<li class="muted">まだありません</li>' : '') + '</ul>';
+    h += '<div class="lga-form"><h4>' + (f.id ? esc(f.name) + 'を直す' : '宿を追加') + '</h4>' + lgFieldsHtml(f, 'lgf') +
+      '<div class="url-actions"><button type="button" class="primary" data-lga="save"' + dis + '>保存</button>' +
+      (f.id ? '<button type="button" class="link-btn" data-lga="new"' + dis + '>やめて新しく追加</button>' : '') + '</div></div>';
+    box.innerHTML = h;
+  }
+
+  /** 宿の入力欄（マスタの管理と、予定の編集の「新しい宿」で共通）。attr は data-lgf（管理）か data-lgn（予定の編集） */
+  function lgFieldsHtml(f, attr) {
+    return '<div class="pl-form">' +
+      '<label>宿の名前 <input type="text" data-' + attr + '="name" maxlength="40" value="' + esc(f.name) + '" placeholder="例：白馬の拠点"></label>' +
+      '<label>種類 <select data-' + attr + '="kind">' + ['拠点', '遠征先'].map(function (k) { return '<option' + (f.kind === k ? ' selected' : '') + '>' + k + '</option>'; }).join('') + '</select></label>' +
+      '<label>住所・URL <input type="text" data-' + attr + '="address" maxlength="200" value="' + esc(f.address) + '"></label>' +
+      '<label>料金メモ <input type="text" data-' + attr + '="priceMemo" maxlength="200" value="' + esc(f.priceMemo) + '" placeholder="例：1泊2食 8,000円（家族にも見えます）"></label>' +
+      '<label class="chk"><input type="checkbox" data-' + attr + '="dinner"' + (f.dinner ? ' checked' : '') + '> 夕食あり</label>' +
+      '<label class="chk"><input type="checkbox" data-' + attr + '="breakfast"' + (f.breakfast ? ' checked' : '') + '> 朝食あり</label>' +
+      '<label>メモ（管理者だけ） <input type="text" data-' + attr + '="memo" maxlength="200" value="' + esc(f.memo) + '"></label></div>';
+  }
+
+  // ---------------------------------------------------------------- 計画タブ：予定の宿泊
+
+  /** 宿泊の夜を選べる範囲：開始日の前の夜（前泊）〜終了日の前の夜 */
+  function lgNightRange(ed) { return datesBetween(addDays(ed.startDate, -1), addDays(ed.endDate, -1)); }
+  function lgDefaultNights(ed) {
+    return ed.startDate < ed.endDate ? datesBetween(ed.startDate, addDays(ed.endDate, -1)) : [addDays(ed.startDate, -1)];   // 1日の予定は前泊
+  }
+
+  /** 日付を変えたら、範囲の外の夜を外す（全部外れたら既定に戻す） */
+  function lgFitNights(ed) {
+    if (!ed.lodging || !ed.lodging.on) return;
+    var r = lgNightRange(ed);
+    ed.lodging.nights = ed.lodging.nights.filter(function (n) { return r.indexOf(n) >= 0; });
+    if (!ed.lodging.nights.length) ed.lodging.nights = lgDefaultNights(ed);
+  }
+
+  function planLodgingHtml(ed) {
+    if (!PARTIAL_DEFAULT.hasOwnProperty(ed.type)) return '';
+    var lg = ed.lodging || { on: false };
+    var h = '<h3 class="pl-h">宿泊</h3><label class="chk"><input type="checkbox" data-lgp="on"' + (lg.on ? ' checked' : '') + '> 宿泊あり（家族・スタッフに夜ごとの出欠を聞く）</label>';
+    if (!lg.on) return h;
+    var opts = (S.lodgings || []).filter(function (l) { return l.active || l.id === lg.lodgingId; });
+    h += '<div class="pl-form"><label>宿 <select data-lgp="lodgingId"><option value="">選んでください</option>' +
+      opts.map(function (l) { return '<option value="' + esc(l.id) + '"' + (lg.lodgingId === l.id ? ' selected' : '') + '>' + esc(l.name) + '（' + esc(l.kind) + '）</option>'; }).join('') +
+      '<option value="__new"' + (lg.lodgingId === '__new' ? ' selected' : '') + '>＋ 新しい宿を登録（大会の宿など）</option></select></label>' +
+      (S.lodgings ? '' : '<p class="hint">宿の一覧を読み込み中…</p>') + '</div>';
+    if (lg.lodgingId === '__new') h += '<div class="lg-new">' + lgFieldsHtml(lg.newL, 'lgn') + '<p class="hint">保存すると「管理」タブの宿の一覧にも残ります。</p></div>';
+    var range = lgNightRange(ed);
+    h += '<fieldset class="lg-nights"><legend>泊まる夜</legend>' + range.map(function (n, i) {
+      return '<label><input type="checkbox" data-lgp="night" value="' + n + '"' + (lg.nights.indexOf(n) >= 0 ? ' checked' : '') + '> ' + lgDate(n) + 'の夜' + (i === 0 ? '（前泊）' : '') + '</label>';
+    }).join('') + '</fieldset>' +
+      '<label class="lg-dl">回答の締切 <input type="date" data-lgp="deadline" value="' + esc(lg.deadline || '') + '"></label>';
+    return h;
+  }
+
+  function planLodgingChange(t) {
+    var ed = S.plan.ed, f = t.dataset.lgp;
+    if (!ed) return false;
+    if (t.dataset.lgn) { ed.lodging.newL[t.dataset.lgn] = t.type === 'checkbox' ? t.checked : t.value; return true; }
+    if (!f) return false;
+    var lg = ed.lodging = ed.lodging || { on: false, lodgingId: '', nights: [], deadline: '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }) };
+    if (f === 'on') {
+      lg.on = t.checked;
+      if (lg.on && !lg.nights.length) lg.nights = lgDefaultNights(ed);
+      if (lg.on && !S.lodgings) loadLodgings(renderPlanEditor);
+      renderPlanEditor();
+    } else if (f === 'lodgingId') { lg.lodgingId = t.value; renderPlanEditor(); }
+    else if (f === 'night') {
+      var i = lg.nights.indexOf(t.value);
+      if (t.checked && i < 0) lg.nights.push(t.value); else if (!t.checked && i >= 0) lg.nights.splice(i, 1);
+      lg.nights.sort();
+    } else if (f === 'deadline') lg.deadline = t.value;
+    return true;
+  }
+
+  /** 保存する宿泊の設定。練習会・合宿・大会以外は送らない（サーバーは今のまま残す） */
+  function planLodgingBody(ed) {
+    if (!PARTIAL_DEFAULT.hasOwnProperty(ed.type) || !ed.lodging) return undefined;
+    var lg = ed.lodging;
+    if (!lg.on) return null;
+    if (!lg.lodgingId) throw new Error('宿を選んでください（無ければ「新しい宿を登録」）');
+    if (!lg.nights.length) throw new Error('泊まる夜を1つ以上選んでください');
+    var out = { nights: lg.nights.slice(), deadline: lg.deadline || '' };
+    if (lg.lodgingId === '__new') {
+      if (!String(lg.newL.name || '').trim()) throw new Error('新しい宿の名前を入れてください');
+      out.newLodging = lg.newL;
+    } else out.lodgingId = lg.lodgingId;
+    return out;
   }
 
   // ================================================================ AI（管理者・スタッフ・家族。v18〜 右下の丸いボタンで開くチャット）

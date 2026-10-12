@@ -526,3 +526,37 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .ans-note { display: block; width: 100%; margin-top: 4px; font-size: 16px; min-height: 40px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: #fff; box-sizing: border-box; }
 .ans-note-hint { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
 .ev-note { font-size: 12px; color: #6b4e00; background: #fff8e6; border-radius: 4px; padding: 1px 6px; margin: 2px 0 2px 1em; }
+
+/* 宿泊の出欠（v21〜） */
+.lg { margin-top: 8px; border: 1px solid #cddaf5; background: #f5f8fe; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+.lg-h { font-size: 15px; margin: 0 0 4px; }
+.lg-h small { font-weight: 400; color: var(--muted); }
+.lg-info { color: var(--ink); overflow-wrap: anywhere; }
+.lg-due { color: var(--t); font-weight: 700; }
+.lg-closed { color: var(--ng); font-weight: 700; }
+.lg-memo { color: var(--muted); }
+.lg-sum { list-style: none; margin: 6px 0; padding: 0; }
+.lg-sum li { border-top: 1px solid #dde6f7; padding: 4px 0; }
+.lg-names, .lg-more { font-size: 13px; color: var(--muted); }
+.lg-unans { color: var(--ng); }
+.lg-form { border-top: 1px dashed #b9c9ea; margin-top: 8px; padding-top: 6px; }
+.lg-form.dirty { background: #fffbe8; }
+.lg-who { font-weight: 700; margin-bottom: 4px; }
+.lg-night { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.lg-date { min-width: 6.5em; font-weight: 700; }
+.lg-btns, .lg-meals { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.lg-btn, .lg-meal { min-height: 40px; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 4px 10px; font-size: 14px; }
+.lg-btn.on { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
+.lg-meal.on { background: var(--o-bg); color: var(--o); border-color: var(--o); font-weight: 700; }
+.lg-btn:disabled, .lg-meal:disabled, .lg-save:disabled { opacity: .55; }
+.lg-unsaved { color: var(--t); font-weight: 700; margin: 4px 0; }
+.lg-save { min-height: 44px; background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 6px 14px; font-weight: 700; margin-top: 4px; }
+.lg-nights { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.lg-nights label { min-height: 36px; display: inline-flex; align-items: center; gap: 4px; }
+.lg-new { border-left: 3px solid var(--accent); padding-left: 8px; margin: 6px 0; }
+.lg-dl { display: block; margin: 6px 0; }
+.lg-admin { margin: 14px 0; }
+.lg-admin h3 { font-size: 15px; margin: 0 0 6px; }
+.lga-list li.off .nm { color: var(--muted); }
+.lga-form { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+.lga-form h4 { margin: 0 0 6px; font-size: 14px; }
