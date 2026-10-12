@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
 <meta name="format-detection" content="telephone=no">
@@ -39,7 +39,6 @@
   <button type="button" data-tab="events" class="tab">予定と担当</button>
   <button type="button" data-tab="roles" class="tab">役割の希望</button>
   <button type="button" data-tab="staff" class="tab" hidden>スタッフ管理</button>
-  <button type="button" data-tab="ai" class="tab" hidden aria-label="AIに質問">AI</button>
 </nav>
 
 <main>
@@ -211,41 +210,17 @@
         <button id="addFamilyBtn" type="button">家族を追加</button>
       </div>
     </div>
+    <!-- AIからの改善提案（v18〜 AIタブをなくしたので、ここに置く。管理者だけ） -->
+    <div id="aiSugBox" class="ai-sug" hidden>
+      <h3>AIからの改善提案 <span id="aiSugUnread" class="ai-sug-count"></span></h3>
+      <p class="hint">右下の「AI」ボタンからの頼みのうち、今の機能でできないものです（家族からのものは「家族：○○家」）。</p>
+      <p id="aiSugStatus" class="ev-status" role="status" aria-live="polite"></p>
+      <ul id="aiSugList" class="ai-sug-list"></ul>
+    </div>
     <div class="admin-url">
       <h3>管理者URL</h3>
       <p class="hint">管理者URLが他の人に知られたかもしれないときに再発行します。<strong>今開いているこのURLもすぐ使えなくなる</strong>ので、新しいURLを必ず控えてください。</p>
       <button id="reissueAdminBtn" type="button" class="danger">管理者URLを再発行</button>
-    </div>
-  </section>
-
-  <!-- AIに質問（管理者・スタッフ。変えられるのは本人の○△×だけで、サーバー側で決めている） -->
-  <section id="tab-ai" class="panel" hidden>
-    <div id="aiSugBox" class="ai-sug" hidden>
-      <h3>AIからの改善提案 <span id="aiSugUnread" class="ai-sug-count"></span></h3>
-      <p id="aiSugStatus" class="ev-status" role="status" aria-live="polite"></p>
-      <ul id="aiSugList" class="ai-sug-list"></ul>
-    </div>
-    <div id="aiHintAdmin" hidden>
-      <p class="hint">予定・空き状況・担当について質問すると、AIがこのアプリのデータを読んで答えます。<strong>答えは間違うことがあります。</strong>担当を決める前に、画面でも確かめてください。</p>
-      <p class="hint">城さんの○△×だけは「12月の冬休み合宿を城△にして」「12/27の印を消して」のように頼めます。AIは変更案を出すだけで、<strong>［この内容で保存］を押したときだけ保存</strong>されます（ほかの人・担当は変えられません）。</p>
-    </div>
-    <div id="aiHintStaff" hidden>
-      <p class="hint">予定・空き状況・担当について質問すると、AIがこのアプリのデータを読んで答えます。<strong>答えは間違うことがあります。</strong></p>
-      <p class="hint">自分の○△×だけ頼めます（印を消して未入力に戻すのも可）。保存は［この内容で保存］を押したときだけ。できないことや改善の提案は城さんに知らされます</p>
-    </div>
-    <div id="aiExamples" class="ai-examples">
-      <button type="button" class="chip">11/7に空いている人は？</button>
-      <button type="button" class="chip">12月に未入力の人は？</button>
-      <button type="button" class="chip">12/13の担当は？</button>
-    </div>
-    <div id="aiLog" class="ai-log" aria-live="polite"></div>
-    <form id="aiForm" class="note-row ai-form">
-      <input id="aiInput" type="text" maxlength="300" placeholder="質問を入力" autocomplete="off" aria-label="AIへの質問">
-      <button id="aiSend" type="submit">質問する</button>
-    </form>
-    <div class="all-tools">
-      <span id="aiUsage" class="ev-status" role="status"></span>
-      <button type="button" id="aiClear" class="link-btn">会話を消す</button>
     </div>
   </section>
 
@@ -281,6 +256,42 @@
     <div class="grid-wrap"><table id="rolesTable" class="roles-table"></table></div>
   </section>
 </main>
+
+<!-- AI（v18〜）：右下の丸いボタンで開くチャット。管理者・スタッフ・家族で同じ形。変えられるのは本人（家族は自分の家族の選手）の分だけで、サーバー側で決めている -->
+<button id="aiFab" class="ai-fab" type="button" hidden aria-haspopup="dialog" aria-controls="aiPanel" aria-expanded="false" aria-label="AIアシスタント"><span aria-hidden="true">AI</span></button>
+<section id="aiPanel" class="ai-panel" role="dialog" aria-modal="false" aria-labelledby="aiTitle" hidden>
+  <div class="ai-head">
+    <h2 id="aiTitle">AIアシスタント</h2>
+    <button id="aiClose" type="button" class="ai-close" aria-label="閉じる">×</button>
+  </div>
+  <div id="aiBody" class="ai-body">
+    <p id="aiWarn" class="ai-warn">AIは間違えることがあります。反映する前に内容を確かめてください。やり取りは改善のため管理者（城）が見ることがあります</p>
+    <div id="aiHintAdmin" hidden>
+      <p class="hint">予定・空き状況・担当について質問すると、AIがこのアプリのデータを読んで答えます。担当を決める前に、画面でも確かめてください。</p>
+      <p class="hint">城さんの○△×だけは「12月の冬休み合宿を城△にして」「12/27の印を消して」のように頼めます。AIは変更案を出すだけで、<strong>［反映］を押したときだけ保存</strong>されます（ほかの人・担当は変えられません）。</p>
+    </div>
+    <div id="aiHintStaff" hidden>
+      <p class="hint">予定・空き状況・担当について質問すると、AIがこのアプリのデータを読んで答えます。</p>
+      <p class="hint">自分の○△×だけ頼めます（印を消して未入力に戻すのも可）。保存は［反映］を押したときだけ。できないことや改善の提案は城さんに知らされます</p>
+    </div>
+    <div id="aiHintFamily" hidden>
+      <p class="hint">練習会などの日時・場所や、アプリの使い方を聞けます。</p>
+      <p class="hint">自分の家族の選手の○△×（未入力に戻す・まとめて塗るも可）と、受付中の予定への参加の回答は、AIが変更案を出します。<strong>［反映］を押したときだけ保存</strong>されます。ほかの家族の選手は変えられません。</p>
+    </div>
+    <div id="aiExamples" class="ai-examples"></div>
+    <div id="aiLog" class="ai-log" aria-live="polite"></div>
+  </div>
+  <div class="ai-foot">
+    <form id="aiForm" class="ai-form">
+      <input id="aiInput" type="text" maxlength="300" placeholder="質問を入力" autocomplete="off" enterkeyhint="send" aria-label="AIへの質問">
+      <button id="aiSend" type="submit">送る</button>
+    </form>
+    <div class="ai-meta">
+      <span id="aiUsage" class="ev-status" role="status"></span>
+      <button type="button" id="aiClear" class="link-btn">会話を消す</button>
+    </div>
+  </div>
+</section>
 
 <script src="config.js"></script>
 <script src="app.js"></script>
