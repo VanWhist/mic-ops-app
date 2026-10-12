@@ -269,12 +269,15 @@ body.has-ai main { padding-bottom: calc(100px + env(safe-area-inset-bottom)); } 
 }
 .ai-fab:active { transform: scale(.96); }
 .ai-panel {
-  position: fixed; z-index: 40; left: 0; right: 0; bottom: 0; height: 88vh; height: 88dvh;
+  position: fixed; z-index: 40; left: 0; right: 0; bottom: 0; height: max(300px, 42vh); height: max(300px, 42dvh);
   display: flex; flex-direction: column; background: var(--bg);
   border-radius: 16px 16px 0 0; box-shadow: 0 -6px 28px rgba(20, 40, 80, .3); overflow: hidden;
 }
 .ai-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--card); border-bottom: 1px solid var(--line); padding: 4px 6px 4px 16px; }
 .ai-head h2 { font-size: 17px; margin: 0; }
+.ai-head-btns { display: flex; align-items: center; gap: 2px; }
+.ai-size { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; border: 1px solid var(--line); background: var(--card); color: var(--accent); border-radius: 8px; padding: 4px 10px; font-size: 14px; font-weight: 700; cursor: pointer; }
+.ai-size-ic { font-size: 18px; line-height: 1; }
 .ai-close { width: 48px; height: 48px; border: 0; background: transparent; font-size: 28px; line-height: 1; color: var(--muted); border-radius: 50%; cursor: pointer; }
 .ai-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 10px 16px; }
 .ai-warn { font-size: 13px; color: #7a4b00; background: var(--t-bg); border-radius: 8px; padding: 6px 10px; margin: 0 0 8px; }
@@ -284,9 +287,22 @@ body.has-ai main { padding-bottom: calc(100px + env(safe-area-inset-bottom)); } 
 .ai-form button { min-width: 64px; border: 0; background: var(--accent); color: #fff; border-radius: 8px; font-weight: 700; }
 .ai-meta { display: flex; justify-content: space-between; align-items: center; min-height: 28px; }
 .ai-meta .ev-status { margin: 0; }
+/* 大きい：画面いっぱい */
+.ai-panel[data-size="large"] { top: 0; height: auto; border-radius: 0; }
+/* 小さいときは後ろの画面を使うので、ページの下に枠の高さぶんの余白（後ろの大事なボタンを枠の上まで出せる） */
+body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px); padding-bottom: calc(max(300px, 42dvh) + 24px); }
+/* 音声入力 */
+.ai-form .ai-mic { min-width: 48px; width: 48px; padding: 0; background: var(--card); color: var(--accent); border: 1px solid var(--accent); display: inline-flex; align-items: center; justify-content: center; }
+.ai-form .ai-mic.on { background: var(--ng); border-color: var(--ng); color: #fff; animation: ai-mic-pulse 1.2s ease-in-out infinite; }
+@keyframes ai-mic-pulse { 50% { box-shadow: 0 0 0 6px rgba(192, 40, 30, .25); } }
+.ai-mic-status { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+.ai-mic-status.on { color: var(--ng); font-weight: 700; }
+.ai-mic-status.ng { color: var(--ng); }
 @media (min-width: 700px) {
   .ai-fab { right: 24px; bottom: 24px; }
-  .ai-panel { left: auto; right: 24px; bottom: 24px; width: 400px; height: min(640px, calc(100vh - 48px)); border-radius: 14px; box-shadow: 0 8px 32px rgba(20, 40, 80, .3); }
+  .ai-panel { left: auto; right: 24px; bottom: 24px; width: 400px; height: min(560px, calc(100vh - 48px)); border-radius: 14px; box-shadow: 0 8px 32px rgba(20, 40, 80, .3); }
+  .ai-panel[data-size="large"] { top: 24px; left: 24px; width: auto; height: auto; border-radius: 14px; }
+  body.ai-open:not(.ai-large) main { padding-bottom: calc(min(560px, 100vh - 48px) + 48px); }   /* PCの小窓の高さぶん */
   .ai-foot { padding-bottom: 8px; }
 }
 
