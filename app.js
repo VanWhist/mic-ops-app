@@ -1106,6 +1106,17 @@
         adminOp('setAnswerOpen', { eventKey: key, open: on });
         return;
       }
+      if (act === 'assign-day') {
+        // 来る日の付け外し（その人のこの予定の担当すべて）。1日以上は残す
+        var ev0 = (((S.events[S.month] || {}).data || {}).events || []).filter(function (x) { return x.key === key; })[0];
+        var a0 = ev0 && ev0.assigned.filter(function (x) { return x.staffId === b.dataset.staff; })[0];
+        if (!a0) return;
+        var cur = (a0.days || ev0.dates).slice(), d = b.dataset.day, i = cur.indexOf(d);
+        if (i >= 0) cur.splice(i, 1); else cur.push(d);
+        if (!cur.length) { S.evMsg = { kind: 'ng', text: '来る日は1日以上選んでください（外すときは［外す］）' }; renderEvents(); return; }
+        adminOp('assign', { eventKey: key, staffId: b.dataset.staff, role: b.dataset.role, on: true, days: cur.sort() });
+        return;
+      }
       if (act === 'assign-pick') {
         // 「全員から選ぶ」：空き状況・役割の希望に関係なく、だれでも担当にできる（電話で頼んだ人など）
         var sel = b.closest('.pick').querySelector('select');
@@ -1732,12 +1743,13 @@
     if (!ev || ev.cal !== 'アプリ') return;
     var t = function (s) { return s.length > 10 ? s.slice(11, 16) : ''; };
     var assign = {};
-    ev.assigned.forEach(function (a) { (assign[a.staffId] = assign[a.staffId] || []).push(a.role); });
+    var assignDays = {};
+    ev.assigned.forEach(function (a) { (assign[a.staffId] = assign[a.staffId] || []).push(a.role); if (a.days) assignDays[a.staffId] = a.days.slice(); });
     if (!S.plan.start) { S.plan.start = ev.dates[0]; S.plan.end = ev.dates[ev.dates.length - 1]; }
     openPlanEditor({
       id: ev.appId, status: ev.appStatus, type: ev.type, name: ev.title, venue: ev.venue || '',
       startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1], allDay: ev.allDay,
-      startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', assign: assign, people: (ev.absentees || []).slice(),
+      startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', assign: assign, assignDays: assignDays, people: (ev.absentees || []).slice(),
       partial: ev.answers ? ev.answers.partial : undefined,
       lodging: ev.lodging ? { on: true, lodgingId: ev.lodging.id, nights: ev.lodging.nights.slice(), deadline: ev.lodging.deadline || '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }) } : undefined
     });
@@ -1765,7 +1777,20 @@
       var ed = p.ed, sid = b.dataset.staff, role = b.dataset.role;
       var cur = ed.assign[sid] = ed.assign[sid] || [];
       var i = cur.indexOf(role);
-      if (i >= 0) cur.splice(i, 1); else cur.push(role);
+      ed.assignDays = ed.assignDays || {};
+      if (i >= 0) cur.splice(i, 1);
+      else {
+        // 担当にした直後の来る日：○の日だけ（○が無ければ全日）。別の役割で担当なら同じ日のまま
+        if (!cur.length || !ed.assignDays[sid]) ed.assignDays[sid] = defaultAssignDays(sid, datesBetween(ed.startDate, ed.endDate));
+        cur.push(role);
+      }
+      renderPlanEditor();
+    } else if (act === 'pday') {
+      var e2 = p.ed, s2 = b.dataset.staff, ds = datesBetween(e2.startDate, e2.endDate);
+      var cd = (e2.assignDays[s2] || ds).slice(), j = cd.indexOf(b.dataset.day);
+      if (j >= 0) cd.splice(j, 1); else cd.push(b.dataset.day);
+      if (!cd.length) { p.msg = { kind: 'ng', text: '⚠ 来る日は1日以上選んでください（外すときは役割のボタンをもう一度）' }; renderPlan(); return; }
+      e2.assignDays[s2] = cd.sort();
       renderPlanEditor();
     } else if (act === 'save') {
       savePlan(b.dataset.status);
@@ -1838,7 +1863,11 @@
       }).join('') + '</div>';
     } else {
       var chosen = [];
-      S.staff.forEach(function (st) { (ed.assign[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) chosen.push(esc(st.name) + '（' + ROLE_SHORT[r] + '）'); }); });
+      S.staff.forEach(function (st) {
+        var ds = (ed.assignDays || {})[st.staffId];
+        var part = ds && ds.length < dates.length ? '・' + shortDays(ds.filter(function (d) { return dates.indexOf(d) >= 0; })) : '';
+        (ed.assign[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) chosen.push(esc(st.name) + '（' + ROLE_SHORT[r] + part + '）'); });
+      });
       h += '<h3 class="pl-h">担当 <small class="muted">' + (chosen.length ? chosen.join('・') : '未定') + '</small></h3>' +
         '<p class="hint">全日○ → 一部○ → △ → 未回答 → × の順。役割のボタンを押すと担当になります（もう一度押すと外れます）。</p>' +
         '<ul class="pl-cands">' + cands.map(function (x) {
@@ -1850,7 +1879,9 @@
               var pref = r && r[role] ? (r[role] === '積極的にやりたい' ? '積極的' : r[role]) : '';
               return '<button type="button" class="role-btn' + (on ? ' on' : '') + '" data-pa="role" data-staff="' + esc(x.st.staffId) + '" data-role="' + role + '" aria-pressed="' + on + '">' +
                 (on ? '✓' : '') + ROLE_SHORT[role] + (pref ? '<small>' + esc(pref) + '</small>' : '') + '</button>';
-            }).join('') + '</span></li>';
+            }).join('') + '</span>' +
+            ((ed.assign[x.st.staffId] || []).some(function (r0) { return roles.indexOf(r0) >= 0; }) && dates.length > 1
+              ? '<div class="assign-days">来る日：' + dayChips(dates, (ed.assignDays && ed.assignDays[x.st.staffId]) || dates, ' data-pa="pday" data-staff="' + esc(x.st.staffId) + '"', p.busy) + '</div>' : '') + '</li>';
         }).join('') + '</ul>';
     }
     h += planLodgingHtml(ed);   // 宿泊（v21〜）。担当の下に置く
@@ -1890,7 +1921,11 @@
     if (status === '中止' && ed.status !== '中止' && !window.confirm('この予定を中止にします。\nカレンダーからは次の反映で消え、家族にも出なくなります。よろしいですか？')) return;
     var roles = ROLES_BY_TYPE[ed.type] || [];
     var assignments = [];
-    S.staff.forEach(function (st) { (ed.assign[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) assignments.push({ staffId: st.staffId, role: r }); }); });
+    var dts = datesBetween(ed.startDate, ed.endDate);
+    S.staff.forEach(function (st) {
+      var ds = ((ed.assignDays || {})[st.staffId] || dts).filter(function (d) { return dts.indexOf(d) >= 0; });
+      (ed.assign[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) assignments.push({ staffId: st.staffId, role: r, days: ds.length ? ds : dts }); });
+    });
     var body = {
       opId: ed.opId, id: ed.id || undefined, type: ed.type, name: ed.name, venue: ed.venue,
       startDate: ed.startDate, endDate: ed.endDate, allDay: !!ed.allDay, startTime: ed.allDay ? '' : ed.startTime, endTime: ed.allDay ? '' : ed.endTime,
@@ -1924,6 +1959,26 @@
     }).then(function () { p.busy = false; renderPlan(); renderEvents(); });
   }
 
+  // ---------------------------------------------------------------- 日ごとの担当（v22〜・城さん決定 2026-10-12）
+  // ★ 担当の人ごとに来る日を持つ（役割は日ごとに変えない）。担当にした直後は○の日だけ（○が無ければ全日）
+  // ★ 2日以上の予定だけ日のボタンを出す。来る日は1日以上（全部外すことはできない）
+
+  function shortDays(days) { return days.map(function (d) { return (+d.slice(5, 7)) + '/' + (+d.slice(8, 10)); }).join('・'); }
+
+  /** 担当にした直後の来る日：その人の○の日。○が1日もなければ全日 */
+  function defaultAssignDays(staffId, dates) {
+    var o = dates.filter(function (d) { return valueOf(staffId, d).s === '○'; });
+    return o.length ? o : dates.slice();
+  }
+
+  /** 日のボタン（押すと付け外し）。attrs は data-* を付ける文字列 */
+  function dayChips(dates, on, attrs, dis) {
+    return '<span class="day-chips">' + dates.map(function (d) {
+      var x = on.indexOf(d) >= 0;
+      return '<button type="button" class="day-chip' + (x ? ' on' : '') + '" aria-pressed="' + x + '" data-day="' + d + '"' + attrs + (dis ? ' disabled' : '') + '>' + (+d.slice(5, 7)) + '/' + (+d.slice(8, 10)) + '<small>' + WD[weekday(d)] + '</small></button>';
+    }).join('') + '</span>';
+  }
+
   function renderEventCard(ev) {
     var open = S.openEvent === ev.key;
     var badges = '<span class="badge type">' + esc(ev.type) + (ev.typeFixed ? '✎' : '') + '</span>' +
@@ -1937,9 +1992,10 @@
       (ev.replaced ? '<span class="badge calsrc">アプリ版に置き換え済み（計画・反映・スタッフ・家族から隠しています）</span>' : '');
     var absent = ev.type === '不在';   // スタッフの不在期間：担当は付けず「不在：誰」を出す
     var assigned = ev.assigned.length ? ev.assigned.map(function (a) {
-      var c = availOn(a.staffId, ev.dates);
+      var days = a.days || ev.dates;   // 来る日だけで警告する（v22〜）
+      var c = availOn(a.staffId, days);
       var warn = c.x ? ' <span class="warn">⚠×の日あり</span>' : (c.n ? ' <span class="warn">⚠未回答の日あり</span>' : '');
-      return '<b>' + esc(nameOf(a.staffId)) + '</b>（' + (ROLE_SHORT[a.role] || esc(a.role)) + '）' + warn;
+      return '<b>' + esc(nameOf(a.staffId)) + '</b>（' + (ROLE_SHORT[a.role] || esc(a.role)) + (a.allDays === false ? '・' + shortDays(days) : '') + '）' + warn;
     }).join('、') : '<span class="muted">未定</span>';
     var h = '<article class="ev' + (open ? ' open' : '') + (ev.appStatus === '下書き' ? ' draft' : '') + (ev.replaced || ev.cancelled ? ' dim' : '') + '" data-key="' + ev.key + '">' +
       '<div class="ev-date">' + evDateLabel(ev) + '</div>' +
@@ -2013,10 +2069,12 @@
       var mine = ev.assigned.filter(function (a) { return a.role === role; });
       if (mine.length) {
         h += '<ul class="cand assigned">' + mine.map(function (a) {
-          var c = availOn(a.staffId, ev.dates);
+          var days = a.days || ev.dates;
+          var c = availOn(a.staffId, days);
           return '<li><span class="nm">' + esc(nameOf(a.staffId)) + '</span><span class="av">' + c.label + '</span>' +
             (c.x ? '<span class="warn">⚠×の日あり</span>' : c.n ? '<span class="warn">⚠未回答の日あり</span>' : '') +
-            '<button type="button" class="mini ghost" data-act="unassign" data-key="' + ev.key + '" data-staff="' + a.staffId + '" data-role="' + role + '"' + (S.evBusy ? ' disabled' : '') + '>外す</button></li>';
+            '<button type="button" class="mini ghost" data-act="unassign" data-key="' + ev.key + '" data-staff="' + a.staffId + '" data-role="' + role + '"' + (S.evBusy ? ' disabled' : '') + '>外す</button>' +
+            (ev.dates.length > 1 ? '<div class="assign-days">来る日：' + dayChips(ev.dates, days, ' data-act="assign-day" data-key="' + ev.key + '" data-staff="' + a.staffId + '" data-role="' + role + '"', S.evBusy) + '</div>' : '') + '</li>';
         }).join('') + '</ul>';
       }
       var top = ROLE_TOP[role];

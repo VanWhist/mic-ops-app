@@ -560,3 +560,11 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .lga-list li.off .nm { color: var(--muted); }
 .lga-form { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
 .lga-form h4 { margin: 0 0 6px; font-size: 14px; }
+
+/* 日ごとの担当（v22〜） */
+.assign-days { flex-basis: 100%; font-size: 13px; color: var(--muted); margin-top: 4px; }
+.day-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
+.day-chip { min-height: 36px; min-width: 44px; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 2px 8px; font-size: 13px; color: var(--muted); }
+.day-chip small { margin-left: 2px; font-size: 11px; }
+.day-chip.on { background: var(--o-bg); border-color: var(--o); color: var(--o); font-weight: 700; }
+.day-chip:disabled { opacity: .55; }
