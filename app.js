@@ -2324,7 +2324,7 @@
   function setupAi() {
     S.ai = [];   // { q, a, error, busy, proposal, pstate }
     var fam = !!S.family;
-    var title = fam ? 'AIに聞く' : 'AIアシスタント';
+    var title = 'Haiku君に聞く';   // AIの表示名は「Haiku君」（城さん決定 2026-10-12）。全画面で同じ
     byId('aiTitle').textContent = title;
     byId('aiFab').setAttribute('aria-label', title);
     byId('aiHintAdmin').hidden = !S.me.isAdmin;
@@ -2545,7 +2545,7 @@
       }
     }, function (e) {
       turn.error = true;
-      turn.a = e.code === 'forbidden' && S.family ? 'サーバー側（Apps Script）がまだ古い版のため、AIを使えません' : e.message;
+      turn.a = e.code === 'forbidden' && S.family ? 'サーバー側（Apps Script）がまだ古い版のため、Haiku君を使えません' : e.message;
     }).then(function () {
       turn.busy = false;
       S.aiBusy = false;
@@ -2629,7 +2629,7 @@
   function renderAi() {
     if (!S.me || !S.ai) return;
     byId('aiLog').innerHTML = S.ai.map(function (t, i) {
-      return '<div class="ai-q">' + esc(t.q) + '</div>' +
+      return '<div class="ai-q">' + esc(t.q) + '</div><div class="ai-from">Haiku君</div>' +   // 返事の差出人
         (t.busy ? '<div class="ai-a busy">考え中…（10〜30秒ほどかかります）</div>'
           : '<div class="ai-a' + (t.error ? ' ng' : '') + '">' + (t.error ? '⚠ ' : '') + esc(t.a) + '</div>') +
         (t.proposal ? proposalHtml(t, i) : '');
