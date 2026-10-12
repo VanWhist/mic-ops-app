@@ -454,6 +454,11 @@
 
   // ================================================================ タブ
 
+  // 家族：保存していない参加の回答があるまま閉じる・再読み込みするときは、ブラウザに確かめてもらう（v15〜）
+  window.addEventListener('beforeunload', function (e) {
+    if (S.me && S.family && hasUnsavedAnswers()) { e.preventDefault(); e.returnValue = ''; }
+  });
+
   function setupTabs() {
     var nav = byId('tabs');
     nav.hidden = false;
@@ -466,6 +471,7 @@
       if (b.dataset.tab === 'ai') b.hidden = !!S.family;
       if (b.dataset.tab === 'roles' && S.family) b.hidden = true;
       b.addEventListener('click', function () {
+        if (S.family && S.tab === 'events' && b.dataset.tab !== 'events' && hasUnsavedAnswers() && !window.confirm(UNSAVED_MSG)) return;
         S.tab = b.dataset.tab;
         renderAll();
         if (S.tab === 'events') { if (S.family) S.ansMsg = null; loadEvents(S.month, !!S.family); }   // 家族は開くたびに最新の受付・回答を読む
@@ -1146,8 +1152,32 @@
   //   日ごとに［終日］［午前］［午後］［時間を指定］［参加しない］（半日・時間の指定がオフの予定は［参加］［参加しない］だけ）。
   //   選んだ内容は下書き（S.ansDraft）に置き、［この内容で保存］で保存。［全部の日に終日で参加］［兄弟にも同じ回答］はすぐ保存。
 
-  var KIND_FULL = [['終日', '終日'], ['午前', '午前'], ['午後', '午後'], ['時間', '時間を指定'], ['不参加', '参加しない']];
-  var KIND_SIMPLE = [['終日', '参加'], ['不参加', '参加しない']];
+  var KIND_FULL = [['終日', '終日'], ['午前', '午前'], ['午後', '午後'], ['時間', '時間を指定'], ['不参加', '不参加']];   // スマホ幅で1行に収める
+  var KIND_SIMPLE = [['終日', '参加'], ['不参加', '不参加']];
+
+  /** 下書きが保存済みの回答と違うか（選んだのに保存していない日がある） */
+  function draftDirty(ev, id) {
+    var dr = S.ansDraft && S.ansDraft[ev.key + '|' + id];
+    if (!dr || !ev.answers) return false;
+    var m = ev.answers.mine[id] || {};
+    var saved = m.days || {};
+    return ev.dates.some(function (d) {
+      var a = dr[d], b = saved[d];
+      if (!a || !a.k) return false;   // 選んでいない日は「変更」ではない
+      if (!b || a.k !== b.k) return true;
+      return a.k === '時間' && (a.s !== (b.s || '') || a.e !== (b.e || ''));
+    });
+  }
+
+  /** 受付中の予定で、保存していない回答があるか（ほかの画面へ移る・閉じるときに知らせる） */
+  function hasUnsavedAnswers() {
+    var d = S.family && S.upcoming && S.upcoming.data;
+    if (!d) return false;
+    return d.events.some(function (ev) {
+      return ev.answers && ev.answers.open && S.myAthletes.some(function (id) { return draftDirty(ev, id); });
+    });
+  }
+  var UNSAVED_MSG = 'まだ保存していない参加の回答があります。保存せずにほかの画面へ移りますか？';
 
   function upcomingEvent(key) {
     var d = S.upcoming && S.upcoming.data;
@@ -1249,7 +1279,9 @@
     var kinds = a.partial ? KIND_FULL : KIND_SIMPLE;
     var hh = halfHours(a.window);
     var attrs = ' data-key="' + ev.key + '" data-id="' + esc(id) + '"';
-    var h = '<div class="ans-ath"><div class="ans-head"><span class="ans-name">' + esc(nameOf(id)) + '</span><small class="ans-saved">' + savedLabel(ev, m) + '</small></div>' +
+    var dirty = a.open && draftDirty(ev, id);
+    var h = '<div class="ans-ath' + (dirty ? ' dirty' : '') + '"><div class="ans-head"><span class="ans-name">' + esc(nameOf(id)) + '</span><small class="ans-saved">' + savedLabel(ev, m) + '</small></div>' +
+      (dirty ? '<p class="ans-unsaved" role="status">まだ保存していません。［この内容で保存］を押してください</p>' : '') +
       (m.recheck ? '<p class="warn">日時が変わりました。もう一度選んでください（前回：' + esc(m.prev) + '）</p>' : '');
     ev.dates.forEach(function (d) {
       var v = dr[d] || {};
