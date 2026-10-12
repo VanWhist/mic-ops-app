@@ -382,7 +382,8 @@
         // URL が無効化・再発行された。前回の内容も消して、何も出さない
         dropLocalCache();
         S.dead = true;
-        ['tabs', 'tab-mine', 'tab-all', 'tab-plan', 'tab-events', 'tab-roles', 'tab-staff', 'tab-ai', 'staleBanner', 'errorBanner'].forEach(hide);
+        ['tabs', 'tab-mine', 'tab-all', 'tab-plan', 'tab-events', 'tab-roles', 'tab-staff', 'aiFab', 'aiPanel', 'staleBanner', 'errorBanner'].forEach(hide);
+        document.body.classList.remove('has-ai');
         byId('asOf').textContent = '';
         return fatal('このURLは使えません。管理者に新しいURLをもらってください。');
       }
@@ -406,7 +407,7 @@
   // ================================================================ 家族の画面（v11〜）
 
   function setupFamilyUI() {
-    // タブ：入力・みんなの予定・練習会など（役割・スタッフ管理・AI は出さない）
+    // タブ：入力・みんなの予定・練習会など（役割・スタッフ管理は出さない。AIは右下のボタン・v18〜）
     var label = { mine: '予定を入力', all: 'みんなの予定', events: '練習会など' };
     document.querySelectorAll('.tab').forEach(function (b) {
       if (label[b.dataset.tab]) b.textContent = label[b.dataset.tab];
@@ -484,16 +485,14 @@
       // 管理者はタブが6つになるので、2つを短くして1行に収める（v14〜）
       if (S.me.isAdmin && b.dataset.tab === 'roles') b.textContent = '役割';
       if (S.me.isAdmin && b.dataset.tab === 'staff') b.textContent = '管理';
-      if (b.dataset.tab === 'ai') b.hidden = !!S.family;
       if (b.dataset.tab === 'roles' && S.family) b.hidden = true;
       b.addEventListener('click', function () {
         if (S.family && S.tab === 'events' && b.dataset.tab !== 'events' && hasUnsavedAnswers() && !window.confirm(UNSAVED_MSG)) return;
         S.tab = b.dataset.tab;
         renderAll();
         if (S.tab === 'events') { if (S.family) S.ansMsg = null; loadEvents(S.month, !!S.family); }   // 家族は開くたびに最新の受付・回答を読む
-        if (S.tab === 'staff') { loadStaffAdmin(); loadFamilies(); }
+        if (S.tab === 'staff') { loadStaffAdmin(); loadFamilies(); loadAiSuggestions(); }
         if (S.tab === 'plan') renderPlan();
-        if (S.tab === 'ai') loadAiSuggestions();
       });
     });
     document.querySelectorAll('.month-nav').forEach(function (nav) {
@@ -2303,19 +2302,33 @@
     byId('reissueAdminBtn').disabled = !!S.stBusy;
   }
 
-  // ================================================================ AIに質問（管理者・スタッフ）
+  // ================================================================ AI（管理者・スタッフ・家族。v18〜 右下の丸いボタンで開くチャット）
   //
-  // ★ 会話はこの画面の中だけに持つ（端末に保存しない）。閉じると消える。
+  // ★ 会話はこの画面の中だけに持つ（端末に保存しない）。×で閉じても、ページを開いている間は残る。
   // ★ 続きの質問のために、直前の3往復だけを文字でサーバーへ渡す。
-  // ★ 変更案（第3段）は表示するだけ。［この内容で保存］で案のIDだけを送り、サーバーが置いた案を保存する。
+  // ★ 変更案は表示するだけ。［反映］で案のIDだけを送り、サーバーが置いた案を保存する。
   //   新しい案が出たら、前の未保存の案はボタンを消す（古い案を押し間違えないように）。
+  // ★ 家族の案は2種類：○△×（athAvail）と参加の回答（answer）。変えられるのは自分の家族の選手だけ（サーバーで判定）。
+  // ★ スマホでは下から出る大きめの画面、PC（幅700px以上）では右下の小窓。キーボードが出たら入力欄の上まで縮める。
 
   var AI_TIMEOUT_MS = 120000;   // Claude を何回か呼ぶので、ふつうの操作より長く待つ
+  var AI_EXAMPLES = {
+    staff: ['11/7に空いている人は？', '12月に未入力の人は？', '12/13の担当は？'],
+    family: ['次の練習会はいつ？', '参加の受付中の予定は？', '12月の土日を○にして']
+  };
 
   function setupAi() {
-    S.ai = [];   // { q, a, error, busy }
+    S.ai = [];   // { q, a, error, busy, proposal, pstate }
+    var fam = !!S.family;
+    var title = fam ? 'AIに聞く' : 'AIアシスタント';
+    byId('aiTitle').textContent = title;
+    byId('aiFab').setAttribute('aria-label', title);
     byId('aiHintAdmin').hidden = !S.me.isAdmin;
-    byId('aiHintStaff').hidden = !!S.me.isAdmin;
+    byId('aiHintStaff').hidden = !!S.me.isAdmin || fam;
+    byId('aiHintFamily').hidden = !fam;
+    byId('aiExamples').innerHTML = AI_EXAMPLES[fam ? 'family' : 'staff'].map(function (q) {
+      return '<button type="button" class="chip">' + esc(q) + '</button>';
+    }).join('');
     byId('aiSugList').addEventListener('click', function (ev) {
       var b = ev.target.closest('button[data-sug]');
       if (!b || S.sugBusy) return;
@@ -2332,8 +2345,9 @@
       ev.preventDefault();
       askAi(byId('aiInput').value);
     });
-    byId('aiExamples').querySelectorAll('.chip').forEach(function (b) {
-      b.addEventListener('click', function () { askAi(b.textContent); });
+    byId('aiExamples').addEventListener('click', function (ev) {
+      var b = ev.target.closest('.chip');
+      if (b && !b.disabled) askAi(b.textContent);
     });
     byId('aiLog').addEventListener('click', function (ev) {
       var b = ev.target.closest('button[data-act]');
@@ -2348,7 +2362,52 @@
       S.ai = [];
       renderAi();
     });
+    byId('aiFab').addEventListener('click', function () { openAi(true); });
+    byId('aiClose').addEventListener('click', function () { openAi(false); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !byId('aiPanel').hidden) openAi(false);
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', fitAiPanel);
+      window.visualViewport.addEventListener('scroll', fitAiPanel);
+    }
+    window.addEventListener('resize', fitAiPanel);
+    byId('aiFab').hidden = false;
+    document.body.classList.add('has-ai');   // 右下のボタンが大事なボタンを隠さないよう、ページの下に余白を取る
     renderAi();
+  }
+
+  function openAi(on) {
+    if (S.dead) on = false;
+    var panel = byId('aiPanel'), fab = byId('aiFab');
+    panel.hidden = !on;
+    fab.hidden = !!on || !!S.dead;
+    fab.setAttribute('aria-expanded', on ? 'true' : 'false');
+    document.body.classList.toggle('ai-open', !!on);
+    if (on) {
+      fitAiPanel();
+      renderAi();
+      // スマホでは開いただけでキーボードを出さない（会話を読めるように）。PCは入力欄へ
+      if (window.matchMedia && window.matchMedia('(min-width: 700px)').matches) byId('aiInput').focus();
+    } else {
+      fab.focus();
+    }
+  }
+
+  /**
+   * キーボードが出たら、見えている高さ（visualViewport）に合わせて画面を縮め、入力欄が隠れないようにする。
+   * Android の Chrome は interactive-widget=resizes-content で画面ごと縮むので、ここでは何もしなくてよい
+   */
+  function fitAiPanel() {
+    var p = byId('aiPanel');
+    if (!p || p.hidden) return;
+    var vv = window.visualViewport;
+    var wide = window.matchMedia && window.matchMedia('(min-width: 700px)').matches;
+    if (!vv || wide) { p.style.bottom = ''; p.style.height = ''; return; }
+    var kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    if (kb < 60) { p.style.bottom = ''; p.style.height = ''; return; }   // キーボードが出ていない
+    p.style.bottom = kb + 'px';
+    p.style.height = Math.max(200, Math.round(vv.height - 8)) + 'px';
   }
 
   function askAi(text) {
@@ -2371,7 +2430,7 @@
       }
     }, function (e) {
       turn.error = true;
-      turn.a = e.message;
+      turn.a = e.code === 'forbidden' && S.family ? 'サーバー側（Apps Script）がまだ古い版のため、AIを使えません' : e.message;
     }).then(function () {
       turn.busy = false;
       S.aiBusy = false;
@@ -2379,7 +2438,7 @@
     });
   }
 
-  /** 管理者：AIからの改善提案の一覧（AIタブを開いたとき・提案が増えたときに読み直す） */
+  /** 管理者：AIからの改善提案の一覧（「管理」タブを開いたとき・提案が増えたときに読み直す） */
   function loadAiSuggestions() {
     if (!S.me || !S.me.isAdmin) return;
     api('aiSuggestions').then(function (r) {
@@ -2412,7 +2471,15 @@
     api('aiApply', { proposalId: turn.proposal.id }).then(function (r) {
       turn.pstate = 'saved';
       turn.savedCount = r.saved.length;
-      refreshBoot();   // 自分の画面の一覧・みんなの予定にも反映する
+      if (r.kind === 'answer') {
+        // 参加の回答：返ってきた「練習会など」で描き直す。同じ予定・選手の下書きは、保存した内容から作り直す
+        S.upcoming = { status: 'ok', data: r.upcoming };
+        (r.athleteIds || []).forEach(function (x) { if (S.ansDraft) delete S.ansDraft[r.eventKey + '|' + x]; });
+        renderUpcoming();
+        renderTabsBadge();
+      } else {
+        refreshBoot();   // 自分の画面の一覧・みんなの予定にも反映する
+      }
     }, function (e) {
       turn.pstate = e.code === 'ai_expired' ? 'old' : 'pending';
       turn.perr = e.message;
@@ -2421,22 +2488,26 @@
 
   function proposalHtml(t, i) {
     var p = t.proposal;
+    var answer = p.kind === 'answer';
     var rows = p.days.map(function (d) {
       var md = (+d.date.slice(5, 7)) + '/' + (+d.date.slice(8, 10)) + '(' + d.weekday + ')';
-      var before = d.before ? d.before.status + (d.before.note ? ' ' + d.before.note : '') : '未入力';
+      // 今の内容：スタッフの案は { status, note }、家族の案は文字（兄弟なら「太郎：○／花子：未入力」）
+      var before = typeof d.before === 'string' ? d.before : d.before ? d.before.status + (d.before.note ? ' ' + d.before.note : '') : '未入力';
       return '<tr><td>' + esc(md) + '</td><td class="muted">' + esc(before) + '</td><td class="to">' + esc(d.status || '未入力に戻す') + '</td><td>' + esc(d.note) + '</td></tr>';
     }).join('');
     var foot;
     if (t.pstate === 'pending') {
-      foot = '<div class="ai-prop-acts"><button type="button" class="primary" data-act="apply" data-i="' + i + '">この内容で保存</button>' +
+      foot = '<div class="ai-prop-acts"><button type="button" class="primary" data-act="apply" data-i="' + i + '">反映</button>' +
         '<button type="button" class="link-btn" data-act="cancel" data-i="' + i + '">やめる</button></div>';
     } else if (t.pstate === 'saving') foot = '<p class="ai-prop-msg busy">保存中…</p>';
-    else if (t.pstate === 'saved') foot = '<p class="ai-prop-msg ok">✓ 保存しました（' + t.savedCount + '日）</p>';
+    else if (t.pstate === 'saved') foot = '<p class="ai-prop-msg ok">✓ 保存しました（' + (answer ? '参加の回答' : t.savedCount + '日') + '）</p>';
     else if (t.pstate === 'cancelled') foot = '<p class="ai-prop-msg">やめました（保存していません）</p>';
     else foot = '<p class="ai-prop-msg">この案は使えません（保存していません）</p>';
     if (t.perr) foot += '<p class="ai-prop-msg ng">⚠ ' + esc(t.perr) + '</p>';
+    var head = answer ? '参加の回答の変更案：' + esc(p.title) + '（' + esc(p.name) + 'さん）'
+      : '変更案：' + esc(p.name) + 'さん（' + p.days.length + '日）';
     return '<div class="ai-prop' + (t.pstate === 'pending' || t.pstate === 'saving' ? '' : ' done') + '">' +
-      '<b>変更案：' + esc(p.name) + 'さん（' + p.days.length + '日）</b>' + (p.summary ? '<div class="muted">' + esc(p.summary) + '</div>' : '') +
+      '<b>' + head + '</b>' + (p.summary ? '<div class="muted">' + esc(p.summary) + '</div>' : '') +
       '<table><thead><tr><th>日付</th><th>今</th><th>変更後</th><th>備考</th></tr></thead><tbody>' + rows + '</tbody></table>' + foot + '</div>';
   }
 
@@ -2450,10 +2521,11 @@
     }).join('');
     byId('aiSend').disabled = !!S.aiBusy;
     byId('aiExamples').querySelectorAll('.chip').forEach(function (b) { b.disabled = !!S.aiBusy; });
+    byId('aiExamples').hidden = S.ai.length > 0;   // 会話が始まったら例は隠す（会話を消すとまた出る）
     byId('aiClear').hidden = !S.ai.length;
     byId('aiUsage').textContent = S.aiUsage ? '今日の利用：' + S.aiUsage : '';
-    var last = byId('aiLog').lastElementChild;
-    if (last && S.tab === 'ai' && last.scrollIntoView) last.scrollIntoView({ block: 'nearest' });
+    var body = byId('aiBody');
+    if (S.ai.length && !byId('aiPanel').hidden) body.scrollTop = body.scrollHeight;
   }
 
   // ================================================================ 描画まとめ
@@ -2500,7 +2572,7 @@
     applyAppName();
     if (!S.me || !S.uiReady || S.dead) return;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === S.tab); });
-    ['mine', 'all', 'plan', 'events', 'roles', 'staff', 'ai'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
+    ['mine', 'all', 'plan', 'events', 'roles', 'staff'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
     renderMonthLabels();
     renderMine();
     renderGrid();
