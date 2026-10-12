@@ -1432,7 +1432,12 @@
   function evDateLabel(ev) {
     var d = ev.dates, f = d[0], l = d[d.length - 1];
     var s = md(f) + '（' + WD[weekday(f)] + '）';
-    if (d.length > 1) return s + '〜' + md(l) + '（' + WD[weekday(l)] + '）' + d.length + '日間';
+    var range = md(l) + '（' + WD[weekday(l)] + '）';
+    if (d.length > 1) {
+      if (ev.allDay) return s + '〜' + range + d.length + '日間';
+      // 時刻のある複数日の予定（計画タブで作る予定など）は毎日同じ時間として出す（［時間を指定］で選べる範囲と同じ）
+      return s + '〜' + range + d.length + '日間・各日 ' + ev.start.slice(11) + '–' + ev.end.slice(11);
+    }
     return ev.allDay ? s + ' 終日' : s + ' ' + ev.start.slice(11) + '–' + ev.end.slice(11);
   }
 
