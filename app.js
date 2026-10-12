@@ -18,7 +18,8 @@
   var HOLIDAYS = {
     '2026-11-03': '文化の日', '2026-11-23': '勤労感謝の日',
     '2027-01-01': '元日', '2027-01-11': '成人の日', '2027-02-11': '建国記念の日',
-    '2027-02-23': '天皇誕生日', '2027-03-21': '春分の日', '2027-03-22': '振替休日'
+    '2027-02-23': '天皇誕生日', '2027-03-21': '春分の日', '2027-03-22': '振替休日',
+    '2027-04-29': '昭和の日', '2027-05-03': '憲法記念日', '2027-05-04': 'みどりの日', '2027-05-05': 'こどもの日'
   };
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
   var ROLE_DEF = [
@@ -251,7 +252,9 @@
   }
   function md(date) { var p = parts(date); return p[1] + '/' + p[2]; }
   function longDate(date) { var p = parts(date); return p[1] + '月' + p[2] + '日（' + WD[weekday(date)] + (HOLIDAYS[date] ? '・祝' : '') + '）'; }
-  function inPeriod(date) { var ym = date.slice(0, 7); return ym >= S.period.start && ym <= S.period.end; }
+  /** 入力・表示できる期間か。終わりはサーバーの settings（calendar_end）から来る endDate（v23〜。古いサーバーは月だけ） */
+  function inPeriod(date) { var ym = date.slice(0, 7); return ym >= S.period.start && ym <= S.period.end && (!S.period.endDate || date <= S.period.endDate); }
+  function periodLastDay() { return S.period.endDate || daysOf(S.period.end).slice(-1)[0]; }
 
   // ================================================================ 状態
 
@@ -550,6 +553,7 @@
   }
 
   function onDayTap(date) {
+    if (!inPeriod(date)) return;   // 期間の外（calendar_end より後）は入力しない
     if (S.range) {
       if (!S.rangeStart) { S.rangeStart = date; renderMine(); return; }
       var a = S.rangeStart;
@@ -688,7 +692,9 @@
       var evs = evDay[d] || [];
       if (evs.length) cls.push('has-ev');
       var label = longDate(d) + ' ' + (v.s || '未回答') + (v.n ? ' ' + v.n : '') + evs.map(function (e) { return '（' + e.type + '：' + e.title + '）'; }).join('');
-      html += '<button type="button" class="' + cls.join(' ') + '" data-date="' + d + '" aria-label="' + esc(label) + '">' +
+      var out = !inPeriod(d);   // 期間の終わり（calendar_end）より後の日は押せない（月の途中で終わるとき）
+      if (out) cls.push('out');
+      html += '<button type="button" class="' + cls.join(' ') + '" data-date="' + d + '" aria-label="' + esc(label) + '"' + (out ? ' disabled' : '') + '>' +
         '<span class="dn">' + parts(d)[2] + '</span><span class="mk">' + esc(v.s) + '</span>' +
         (v.n ? '<span class="nd" aria-hidden="true"></span>' : '') +
         (evs.length ? '<span class="dev ' + inEvClass(evs[0].type) + '" aria-hidden="true">' + esc(shortTitle(evs[0].title)) + (evs.length > 1 ? '+' + (evs.length - 1) : '') + '</span>' : '') +
@@ -1680,7 +1686,7 @@
     var end = p.end || p.start;
     var dates = datesBetween(p.start, end);
     var br = planBreak(dates);
-    var lim = S.period ? { min: S.period.start + '-01', max: daysOf(S.period.end).slice(-1)[0] } : {};
+    var lim = S.period ? { min: S.period.start + '-01', max: periodLastDay() } : {};
     var h = '<div class="pl-detail">' +
       '<div class="pl-range"><label>開始日 <input type="date" data-pd="start" value="' + p.start + '" min="' + lim.min + '" max="' + lim.max + '"></label>' +
       '<label>終了日 <input type="date" data-pd="end" value="' + end + '" min="' + lim.min + '" max="' + lim.max + '"></label>' +
@@ -1838,7 +1844,7 @@
     var dates = datesBetween(ed.startDate, ed.endDate);
     var br = planBreak(dates);
     var roles = ROLES_BY_TYPE[ed.type] || [];
-    var lim = { min: S.period.start + '-01', max: daysOf(S.period.end).slice(-1)[0] };
+    var lim = { min: S.period.start + '-01', max: periodLastDay() };
     var isNew = !ed.id;
     var h = '<div class="pl-sticky"><div><b>' + esc(ed.startDate === ed.endDate ? longDate(ed.startDate) : longDate(ed.startDate) + '〜' + longDate(ed.endDate)) + '</b> ' + dates.length + '日間' +
       (ed.status ? ' <span class="badge ' + (ed.status === '下書き' ? 'draft' : ed.status === '中止' ? 'tent' : 'venue') + '">' + esc(ed.status) + '</span>' : ' <span class="badge draft">新規</span>') + '</div>' +

@@ -568,3 +568,6 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .day-chip small { margin-left: 2px; font-size: 11px; }
 .day-chip.on { background: var(--o-bg); border-color: var(--o); color: var(--o); font-weight: 700; }
 .day-chip:disabled { opacity: .55; }
+
+/* 期間の外の日（calendar_end より後。v23〜） */
+.cal .day.out { opacity: .35; }
