@@ -1964,12 +1964,14 @@
       // 日ごとの内訳（v15〜）。受付前で回答もなければ出さない（長い合宿で空の行が並ばないように）
       var anyAns = a.open || a.yes.length || a.no.length || a.recheck.length;
       if (anyAns) h += '<ul class="ev-days">' + (a.days || []).map(function (d) {
+        // 日ごとに、誰がどの区分か（名前）を出す。未回答は人数だけ
+        var who = function (xs) { return xs.length ? '（' + xs.map(function (x) { return esc(x.name); }).join('・') + '）' : ''; };
         var parts = [];
         if (a.partial || d.time.length) {
-          parts.push('終日' + d.full.length);
+          parts.push('終日' + d.full.length + who(d.full));
           if (d.time.length) parts.push('時間指定' + d.time.length + '（' + d.time.map(function (x) { return esc(x.name) + ' ' + x.start + '–' + x.end; }).join('、') + '）');
-        } else parts.push('参加' + d.full.length);
-        parts.push('不参加' + d.no.length, '未回答' + d.unanswered.length);
+        } else parts.push('参加' + d.full.length + who(d.full));
+        parts.push('不参加' + d.no.length + who(d.no), '未回答' + d.unanswered.length);
         // 家族の備考（管理者だけ。サーバーは管理者にだけ返す）
         var notes = (d.notes || []).map(function (x) { return '<div class="ev-note">備考：' + esc(x.name) + ' ' + esc(x.note) + '</div>'; }).join('');
         return '<li>' + md(d.date) + '：' + parts.join('・') + notes + '</li>';
