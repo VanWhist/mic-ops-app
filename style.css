@@ -463,3 +463,8 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .mini.ghost2 { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
 .ans-ath.dirty { background: #fff8e6; margin: 0 -6px; padding-left: 6px; padding-right: 6px; border-radius: 6px; }
 .ans-unsaved { margin: 2px 0 4px; font-size: 13px; color: #9a5b00; font-weight: 700; }
+
+/* 日ごとの備考（v16〜・管理者だけが見る） */
+.ans-note { display: block; width: 100%; margin-top: 4px; font-size: 16px; min-height: 40px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; background: #fff; box-sizing: border-box; }
+.ans-note-hint { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.ev-note { font-size: 12px; color: #6b4e00; background: #fff8e6; border-radius: 4px; padding: 1px 6px; margin: 2px 0 2px 1em; }
