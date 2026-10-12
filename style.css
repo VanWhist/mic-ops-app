@@ -353,6 +353,7 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 }
 .ev-camp { background: #6d28d9; }
 .ev-comp { background: #c2410c; }
+.ev-prac { background: #15803d; }
 .day.has-ev .mk { position: absolute; top: 2px; right: 5px; font-size: 17px; margin: 0; }
 .day.has-ev .nd { bottom: auto; top: 22px; }
 .day.today.has-ev::after { bottom: auto; top: 18px; left: 4px; font-size: 10px; }
