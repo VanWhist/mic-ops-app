@@ -538,6 +538,7 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .lg-sum { list-style: none; margin: 6px 0; padding: 0; }
 .lg-sum li { border-top: 1px solid #dde6f7; padding: 4px 0; }
 .lg-names, .lg-more { font-size: 13px; color: var(--muted); }
+.lg-unans { color: var(--ng); }
 .lg-form { border-top: 1px dashed #b9c9ea; margin-top: 8px; padding-top: 6px; }
 .lg-form.dirty { background: #fffbe8; }
 .lg-who { font-weight: 700; margin-bottom: 4px; }

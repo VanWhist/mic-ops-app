@@ -2322,6 +2322,7 @@
   // ★ 家族は自分の家族の選手の分、スタッフは自分の分を答える。管理者は夜ごとの集計（名前・食事）と「宿に伝える内容をコピー」
   // ★ ［泊まる］を選ぶと、宿に食事があれば食事を「要」にしておく（変えられる）。［宿泊の回答を保存］で保存。締切を過ぎたら見るだけ
   // ★ 料金の計算・集金、カレンダーへの反映、Haiku君による入力の代行はしない
+  // ★ 未回答（城さん確定 2026-10-12）：管理者は夜ごとに名前、スタッフは人数だけ。宿に伝えるコピーには入れない
 
   var LG_STAYS = ['泊まる', '泊まらない', '未定'];
 
@@ -2384,7 +2385,9 @@
       if (admin) {
         if (s.maybe.length) more += '<div class="lg-more">未定：' + s.maybe.map(function (p) { return esc(p.name); }).join('・') + '</div>';
         if (s.no.length) more += '<div class="lg-more">泊まらない：' + s.no.map(function (p) { return esc(p.name); }).join('・') + '</div>';
-      }
+        // 未回答：その夜の当日か翌日に参加する（選手は参加の回答が終日・時間、スタッフは担当）のに、宿泊の回答がない人
+        if (s.unanswered && s.unanswered.length) more += '<div class="lg-more lg-unans">未回答：' + s.unanswered.map(function (p) { return esc(p.name); }).join('・') + '</div>';
+      } else if (s.unansweredCount) more += '<div class="lg-more lg-unans">未回答' + s.unansweredCount + '名</div>';   // スタッフは人数だけ
       return '<li>' + line + (names.length ? '<div class="lg-names">' + names.join('・') + '</div>' : '') + more + '</li>';
     }).join('') + '</ul>';
   }
