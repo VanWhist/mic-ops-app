@@ -12,7 +12,7 @@
   var NAMES = 'ABCDEFGHIJKL'.split('').map(function (c, i) {
     return { staffId: 'S' + String(i + 1).padStart(3, '0'), name: 'スタッフ' + c };
   });
-  var PERIOD = { start: '2026-11', end: '2027-03' };
+  var PERIOD = { start: '2026-11', end: '2027-05', endDate: '2027-05-31' };   // 本番はサーバーの settings（calendar_end）から来る
   var STATUSES = ['○', '△', '×'];
   var VENUES = ['O-air', 'S-air', '佐野坂', '白馬'];
 
