@@ -268,16 +268,16 @@
     </div>
   </div>
   <div id="aiBody" class="ai-body">
-    <p id="aiWarn" class="ai-warn">AIは間違えることがあります。反映する前に内容を確かめてください。やり取りの要約が、改善のため管理者（城）に届くことがあります</p>
-    <div id="aiHintAdmin" hidden>
+    <p id="aiWarn" class="ai-warn"><span class="ai-warn-short">AIは間違えることがあります。</span><span class="ai-warn-rest">反映する前に内容を確かめてください。やり取りの要約が、改善のため管理者（城）に届くことがあります</span><button id="aiWarnMore" type="button" class="ai-warn-more" aria-label="注意書きをすべて表示" aria-expanded="false" aria-controls="aiWarn"></button></p>
+    <div id="aiHintAdmin" class="ai-hint-box" hidden>
       <p class="hint">予定・空き状況・担当について質問すると、AIがこのアプリのデータを読んで答えます。担当を決める前に、画面でも確かめてください。</p>
       <p class="hint">城さんの○△×だけは「12月の冬休み合宿を城△にして」「12/27の印を消して」のように頼めます。AIは変更案を出すだけで、<strong>［反映］を押したときだけ保存</strong>されます（ほかの人・担当は変えられません）。</p>
     </div>
-    <div id="aiHintStaff" hidden>
+    <div id="aiHintStaff" class="ai-hint-box" hidden>
       <p class="hint">予定・空き状況・担当について質問すると、AIがこのアプリのデータを読んで答えます。</p>
       <p class="hint">自分の○△×だけ頼めます（印を消して未入力に戻すのも可）。保存は［反映］を押したときだけ。できないことや改善の提案は城さんに知らされます</p>
     </div>
-    <div id="aiHintFamily" hidden>
+    <div id="aiHintFamily" class="ai-hint-box" hidden>
       <p class="hint">練習会などの日時・場所や、アプリの使い方を聞けます。</p>
       <p class="hint">自分の家族の選手の○△×（未入力に戻す・まとめて塗るも可）と、受付中の予定への参加の回答は、AIが変更案を出します。<strong>［反映］を押したときだけ保存</strong>されます。ほかの家族の選手は変えられません。</p>
     </div>
