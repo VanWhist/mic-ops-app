@@ -422,12 +422,20 @@
       if (b) switchAthlete(b.dataset.ath);
     });
     byId('sibAll').addEventListener('change', function (e) { S.sibAll = e.target.checked; renderMine(); });
-    document.querySelector('#tab-events .hint').textContent = 'これからの練習会・合宿・大会です。参加の受付中の予定は、選手ごとに［参加する］［参加しない］を選んでください。';
+    document.querySelector('#tab-events .hint').textContent = 'これからの練習会・合宿・大会です。参加の受付中の予定は、選手ごと・日ごとに参加の仕方を選んで［この内容で保存］を押してください。';
     document.querySelector('#tab-events .month-nav').hidden = true;   // 月ごとではなく、これからの予定をまとめて出す
     byId('evList').addEventListener('click', function (e) {
-      var b = e.target.closest('[data-ans]');
+      var b = e.target.closest('[data-ad]');
       if (!b || b.disabled || S.ansBusy) return;
-      answerEvent(b.dataset.key, b.dataset.ids.split(','), b.dataset.ans);
+      answerClick(b);
+    });
+    byId('evList').addEventListener('change', function (e) {
+      var t = e.target;
+      if (!t.dataset || !t.dataset.adt) return;
+      var dr = draftOf(t.dataset.key, t.dataset.id);
+      var v = dr[t.dataset.date] || (dr[t.dataset.date] = { k: '時間' });
+      v[t.dataset.adt] = t.value;
+      renderUpcoming();
     });
     document.querySelector('#tab-all .hint').textContent = '全選手の○△×です（見るだけ）。日付をタップすると、その日の○・△の人を表示します。';
   }
@@ -1061,6 +1069,7 @@
         adminOp('setReplaced', { eventKey: key, replaced: rep });
         return;
       }
+      if (act === 'answer-partial') { adminOp('setAnswerPartial', { eventKey: key, partial: b.dataset.on === '1' }); return; }
       if (act === 'answer-open') {
         var on = b.dataset.open === '1';
         if (!on && !window.confirm('参加の受付を止めます。\n家族は回答できなくなります（それまでの回答は残ります）。よろしいですか？')) return;
@@ -1133,30 +1142,134 @@
     if (b) b.textContent = '練習会など' + (n ? '（' + n + '）' : '');
   }
 
-  function answerEvent(key, ids, answer) {
+  // ---- 参加の回答（v15〜日ごと＋半日＋時間指定）
+  //   日ごとに［終日］［午前］［午後］［時間を指定］［参加しない］（半日・時間の指定がオフの予定は［参加］［参加しない］だけ）。
+  //   選んだ内容は下書き（S.ansDraft）に置き、［この内容で保存］で保存。［全部の日に終日で参加］［兄弟にも同じ回答］はすぐ保存。
+
+  var KIND_FULL = [['終日', '終日'], ['午前', '午前'], ['午後', '午後'], ['時間', '時間を指定'], ['不参加', '参加しない']];
+  var KIND_SIMPLE = [['終日', '参加'], ['不参加', '参加しない']];
+
+  function upcomingEvent(key) {
     var d = S.upcoming && S.upcoming.data;
-    var ev = d && d.events.filter(function (x) { return x.key === key; })[0];
+    return d && d.events.filter(function (x) { return x.key === key; })[0];
+  }
+
+  /** 選手の下書き（まだ無ければ保存済みの回答から作る） */
+  function draftOf(key, id) {
+    S.ansDraft = S.ansDraft || {};
+    var k = key + '|' + id;
+    if (!S.ansDraft[k]) {
+      var ev = upcomingEvent(key);
+      var m = (ev && ev.answers && ev.answers.mine[id]) || {};
+      var dr = {};
+      Object.keys(m.days || {}).forEach(function (d) { var v = m.days[d]; dr[d] = { k: v.k, s: v.s || '', e: v.e || '' }; });
+      S.ansDraft[k] = dr;
+    }
+    return S.ansDraft[k];
+  }
+
+  function halfHours(win) {
+    var out = [];
+    var t = function (x) { var p = x.split(':'); return +p[0] * 60 + +p[1]; };
+    for (var m = t(win.start); m <= t(win.end); m += 30) out.push(('0' + Math.floor(m / 60)).slice(-2) + ':' + ('0' + m % 60).slice(-2));
+    return out;
+  }
+
+  /** 下書き → 送る形。足りない日・時間の不備があれば null と理由 */
+  function draftDays(ev, dr) {
+    var days = [], why = '';
+    ev.dates.forEach(function (d) {
+      var v = dr[d];
+      if (!v || !v.k) { why = why || md(d) + 'を選んでください'; return; }
+      if (v.k === '時間' && !(v.s && v.e && v.s < v.e)) { why = why || md(d) + 'の時間（始まり・終わり）を選んでください'; return; }
+      days.push(v.k === '時間' ? { date: d, kind: '時間', start: v.s, end: v.e } : { date: d, kind: v.k });
+    });
+    return why ? { why: why } : { days: days };
+  }
+
+  function answerClick(b) {
+    var key = b.dataset.key, id = b.dataset.id, act = b.dataset.ad;
+    var ev = upcomingEvent(key);
+    if (!ev || !ev.answers) return;
+    var dr = draftOf(key, id);
+    if (act === 'kind') {
+      var date = b.dataset.date, kind = b.dataset.kind;
+      if (kind === '時間') {
+        var hh = halfHours(ev.answers.window);
+        var cur = dr[date] && dr[date].k === '時間' ? dr[date] : null;
+        dr[date] = cur || { k: '時間', s: hh[0], e: hh[hh.length - 1] };
+      } else dr[date] = { k: kind };
+      S.ansMsg = null;
+      renderUpcoming();
+      return;
+    }
+    if (act === 'allfull') {
+      var all = {};
+      ev.dates.forEach(function (d) { all[d] = { k: '終日' }; });
+      S.ansDraft[key + '|' + id] = all;
+      answerEvent(key, [id], ev.dates.map(function (d) { return { date: d, kind: '終日' }; }));
+      return;
+    }
+    var got = draftDays(ev, dr);
+    if (got.why) { S.ansMsg = { kind: 'ng', text: '⚠ ' + nameOf(id) + '：' + got.why }; renderUpcoming(); return; }
+    if (act === 'save') answerEvent(key, [id], got.days);
+    else if (act === 'sib') {
+      var ids = S.myAthletes.slice();
+      ids.forEach(function (x) { S.ansDraft[key + '|' + x] = JSON.parse(JSON.stringify(dr)); });
+      answerEvent(key, ids, got.days);
+    }
+  }
+
+  function answerEvent(key, ids, days) {
+    var ev = upcomingEvent(key);
     if (!ev) return;
     var month = ev.dates.filter(inPeriod)[0];
     S.ansBusy = true;
     S.ansMsg = { kind: 'busy', text: '保存中…' };
     renderUpcoming();
-    api('answer', { month: month.slice(0, 7), eventKey: key, athleteIds: ids, answer: answer }).then(function (r) {
+    api('answer', { month: month.slice(0, 7), eventKey: key, athleteIds: ids, days: days }).then(function (r) {
       S.upcoming = { status: 'ok', data: r };
-      S.ansMsg = { kind: 'ok', text: '✓ ' + ev.title + '：' + ids.map(nameOf).join('・') + 'は「' + answer + '」で保存しました' };
+      ids.forEach(function (x) { delete S.ansDraft[key + '|' + x]; });   // 保存した内容から作り直す
+      S.ansMsg = { kind: 'ok', text: '✓ ' + ev.title + '：' + ids.map(nameOf).join('・') + 'の回答を保存しました' };
     }, function (e) {
       S.ansMsg = { kind: 'ng', text: '⚠ 保存できませんでした：' + e.message };
     }).then(function () { S.ansBusy = false; renderUpcoming(); renderTabsBadge(); });
   }
 
-  function answerRow(ev, id) {
-    var m = ev.answers.mine[id] || {};
-    var dis = S.ansBusy || !ev.answers.open ? ' disabled' : '';
-    var btn = function (ans, cls) {
-      return '<button type="button" class="ans-btn ' + cls + (m.a === ans ? ' on' : '') + '" data-ans="' + ans + '" data-key="' + ev.key + '" data-ids="' + esc(id) + '"' + dis + '>' + (m.a === ans ? '✓ ' : '') + ans + '</button>';
-    };
-    return '<div class="ans-row"><span class="ans-name">' + esc(nameOf(id)) + '</span>' + btn('参加する', 'yes') + btn('参加しない', 'no') +
-      (m.recheck ? '<span class="warn">日時が変わりました。もう一度選んでください（前回：' + esc(m.prev) + '）</span>' : '') + '</div>';
+  function savedLabel(ev, m) {
+    if (!m || !m.a) return '<span class="muted">未回答</span>';
+    var n = ev.dates.filter(function (d) { return m.days && m.days[d] && m.days[d].k !== '不参加'; }).length;
+    return m.a === '参加する' ? '保存済み：参加' + (ev.dates.length > 1 ? '（' + n + '/' + ev.dates.length + '日）' : '') : '保存済み：参加しない';
+  }
+
+  function answerBlock(ev, id) {
+    var a = ev.answers, m = a.mine[id] || {};
+    var dr = draftOf(ev.key, id);
+    var dis = S.ansBusy || !a.open ? ' disabled' : '';
+    var kinds = a.partial ? KIND_FULL : KIND_SIMPLE;
+    var hh = halfHours(a.window);
+    var attrs = ' data-key="' + ev.key + '" data-id="' + esc(id) + '"';
+    var h = '<div class="ans-ath"><div class="ans-head"><span class="ans-name">' + esc(nameOf(id)) + '</span><small class="ans-saved">' + savedLabel(ev, m) + '</small></div>' +
+      (m.recheck ? '<p class="warn">日時が変わりました。もう一度選んでください（前回：' + esc(m.prev) + '）</p>' : '');
+    ev.dates.forEach(function (d) {
+      var v = dr[d] || {};
+      h += '<div class="ans-day"><span class="ans-date">' + md(d) + '（' + WD[weekday(d)] + '）</span><div class="ans-kinds">' + kinds.map(function (k) {
+        var on = v.k === k[0];
+        return '<button type="button" class="ans-k' + (on ? ' on' : '') + (k[0] === '不参加' ? ' no' : '') + '" data-ad="kind" data-date="' + d + '" data-kind="' + k[0] + '"' + attrs + ' aria-pressed="' + on + '"' + dis + '>' + k[1] + '</button>';
+      }).join('') + '</div>';
+      if (v.k === '時間') {
+        var sel = function (f, val) {
+          return '<select data-adt="' + f + '" data-date="' + d + '"' + attrs + dis + ' aria-label="' + md(d) + (f === 's' ? 'の始まり' : 'の終わり') + '">' +
+            hh.map(function (t) { return '<option' + (t === val ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select>';
+        };
+        h += '<div class="ans-time">' + sel('s', v.s) + '<span>〜</span>' + sel('e', v.e) + '</div>';
+      }
+      h += '</div>';
+    });
+    h += '<div class="ans-acts"><button type="button" class="ans-save" data-ad="save"' + attrs + dis + '>この内容で保存</button>' +
+      (ev.dates.length > 1 ? '<button type="button" class="ans-sub" data-ad="allfull"' + attrs + dis + '>全部の日に' + (a.partial ? '終日で' : '') + '参加</button>' : '') +
+      (S.myAthletes.length > 1 ? '<button type="button" class="ans-sub" data-ad="sib"' + attrs + dis + '>兄弟にも同じ回答</button>' : '') + '</div></div>';
+    return h;
   }
 
   function familyCard(ev, asking) {
@@ -1166,17 +1279,10 @@
       '<div class="badges"><span class="badge type">' + esc(ev.type === '練習' ? '練習会' : ev.type) + '</span>' + (ev.tentative ? '<span class="badge tent">仮</span>' : '') +
       (a ? '<span class="badge ' + (a.open ? 'venue' : 'novenue') + '">' + (a.open ? '参加の受付中' : '受付前') + '</span>' : '') + '</div>';
     if (a) {
-      h += '<div class="ev-part">参加確定：' + a.yes.length + '名' + (a.yes.length ? '（' + a.yes.map(function (x) { return esc(x.name); }).join('・') + '）' : '') + '</div>';
+      h += '<div class="ev-part">参加（1日以上）：' + a.yes.length + '名' + (a.yes.length ? '（' + a.yes.map(function (x) { return esc(x.name); }).join('・') + '）' : '') + '</div>';
       if (a.open) {
         var ids = asking ? asking : S.myAthletes;
-        h += '<div class="ans">' + ids.map(function (id) { return answerRow(ev, id); }).join('');
-        if (ids.length > 1) {
-          var all = ids.join(',');
-          h += '<div class="ans-row ans-all"><span class="ans-name">兄弟まとめて</span>' +
-            '<button type="button" class="ans-btn yes" data-ans="参加する" data-key="' + ev.key + '" data-ids="' + esc(all) + '"' + (S.ansBusy ? ' disabled' : '') + '>参加する</button>' +
-            '<button type="button" class="ans-btn no" data-ans="参加しない" data-key="' + ev.key + '" data-ids="' + esc(all) + '"' + (S.ansBusy ? ' disabled' : '') + '>参加しない</button></div>';
-        }
-        h += '</div>';
+        h += '<div class="ans">' + ids.map(function (id) { return answerBlock(ev, id); }).join('') + '</div>';
       }
     }
     return h + '</article>';
@@ -1325,6 +1431,7 @@
   // ★ 予定の説明文（選手名）はサーバーがそもそも返さない。
 
   var PLAN_TYPES = [['練習', '練習会'], ['合宿', '合宿'], ['大会', '大会'], ['一般レッスン', '一般レッスン'], ['不在', '不在']];
+  var PARTIAL_DEFAULT = { '練習': true, '合宿': false, '大会': false };   // 半日・時間の指定（最初の値。v15〜）
   var ROLES_BY_TYPE = { '練習': ['coaching'], '合宿': ['coaching', 'escort'], '大会': ['escort'], '一般レッスン': ['lesson'], '不在': [] };
   var CAT_LABEL = { full: '全日○', part: '一部○', maybe: '△あり', none: '未回答', ng: '×' };
   var CAT_ORDER = ['full', 'part', 'maybe', 'none', 'ng'];
@@ -1560,7 +1667,8 @@
     openPlanEditor({
       id: ev.appId, status: ev.appStatus, type: ev.type, name: ev.title, venue: ev.venue || '',
       startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1], allDay: ev.allDay,
-      startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', assign: assign, people: (ev.absentees || []).slice()
+      startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', assign: assign, people: (ev.absentees || []).slice(),
+      partial: ev.answers ? ev.answers.partial : undefined
     });
   }
   /** 置き換え済みも含めて探す（予定と担当から開くとき） */
@@ -1613,6 +1721,7 @@
     if (!f || !p.ed) return;
     var ed = p.ed;
     if (f === 'allDay') ed.allDay = t.checked;
+    else if (f === 'partial') { ed.partial = t.checked; return; }
     else if (f === 'person') {
       var i = ed.people.indexOf(t.value);
       if (t.checked && i < 0) ed.people.push(t.value); else if (!t.checked && i >= 0) ed.people.splice(i, 1);
@@ -1643,6 +1752,7 @@
       '<div class="pl-dates"><label>開始日 <input type="date" data-ed="startDate" value="' + ed.startDate + '" min="' + lim.min + '" max="' + lim.max + '"></label>' +
       '<label>終了日 <input type="date" data-ed="endDate" value="' + ed.endDate + '" min="' + lim.min + '" max="' + lim.max + '"></label></div>' +
       '<label class="chk"><input type="checkbox" data-ed="allDay"' + (ed.allDay ? ' checked' : '') + '> 終日</label>' +
+      (PARTIAL_DEFAULT.hasOwnProperty(ed.type) ? '<label class="chk"><input type="checkbox" data-ed="partial"' + (planPartial(ed) ? ' checked' : '') + '> 家族の参加の回答で、半日・時間の指定を受け付ける</label>' : '') +
       (ed.allDay ? '' : '<div class="pl-dates"><label>開始時刻 <input type="time" step="300" data-ed="startTime" value="' + esc(ed.startTime) + '"></label>' +
         '<label>終了時刻 <input type="time" step="300" data-ed="endTime" value="' + esc(ed.endTime) + '"></label></div>') +
       '<label>スタッフ向けメモ <textarea data-ed="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(ed.memo) + '</textarea></label></div>';
@@ -1688,6 +1798,9 @@
     byId('plEditor').innerHTML = h;
   }
 
+  /** 半日・時間の指定：手で変えていなければ種類で決める（練習会はオン、合宿・大会はオフ） */
+  function planPartial(ed) { return typeof ed.partial === 'boolean' ? ed.partial : !!PARTIAL_DEFAULT[ed.type]; }
+
   function staffCands(dates) {
     var rank = { full: 0, part: 1, maybe: 2, none: 3, ng: 4 };
     return S.staff.map(function (st, i) { return { st: st, i: i, c: planCat(staffVal, st.staffId, dates) }; })
@@ -1708,6 +1821,7 @@
       startDate: ed.startDate, endDate: ed.endDate, allDay: !!ed.allDay, startTime: ed.allDay ? '' : ed.startTime, endTime: ed.allDay ? '' : ed.endTime,
       status: status, memo: ed.memo, assignments: ed.type === '不在' ? [] : assignments, people: ed.type === '不在' ? ed.people : []
     };
+    if (PARTIAL_DEFAULT.hasOwnProperty(ed.type)) body.partial = planPartial(ed);
     var label = status === '下書き' ? '下書きで保存しました' : status === '中止' ? '中止にしました' : '確定しました';
     planOp('saveAppEvent', body, label, status === '確定');
   }
@@ -1785,12 +1899,30 @@
     var a = ev.answers;
     if (a) {
       var un = a.unanswered.length + a.recheck.length;
-      h += '<div class="ev-part ev-ans">参加：確定<b>' + a.yes.length + '名</b>' + (a.yes.length ? '（' + a.yes.map(nm).join('・') + '）' : '') +
+      h += '<div class="ev-part ev-ans">参加（1日以上）<b>' + a.yes.length + '名</b>' + (a.yes.length ? '（' + a.yes.map(nm).join('・') + '）' : '') +
         '・不参加' + a.no.length + '名' + (a.no.length ? '（' + a.no.map(nm).join('・') + '）' : '') +
         '・未回答' + un + '名' + (a.recheck.length ? '（うち日時変更で要確認' + a.recheck.length + '名）' : '') +
         ' <span class="badge ' + (a.open ? 'venue' : 'novenue') + '">' + (a.open ? '受付中' : '受付前') + '</span>' +
         (S.me.isAdmin ? ' <button type="button" class="mini' + (a.open ? ' ghost' : '') + '" data-act="answer-open" data-key="' + ev.key + '" data-open="' + (a.open ? '0' : '1') + '"' + (S.evBusy ? ' disabled' : '') + '>' +
           (a.open ? '受付を止める' : '参加の受付を始める') + '</button>' : '') + '</div>';
+      // 日ごとの内訳（v15〜）。受付前で回答もなければ出さない（長い合宿で空の行が並ばないように）
+      var anyAns = a.open || a.yes.length || a.no.length || a.recheck.length;
+      if (anyAns) h += '<ul class="ev-days">' + (a.days || []).map(function (d) {
+        var parts = [];
+        if (a.partial || d.am.length || d.pm.length || d.time.length) {
+          parts.push('終日' + d.full.length);
+          if (d.am.length) parts.push('午前' + d.am.length);
+          if (d.pm.length) parts.push('午後' + d.pm.length);
+          if (d.time.length) parts.push('時間指定' + d.time.length + '（' + d.time.map(function (x) { return esc(x.name) + ' ' + x.start + '–' + x.end; }).join('、') + '）');
+        } else parts.push('参加' + d.full.length);
+        parts.push('不参加' + d.no.length, '未回答' + d.unanswered.length);
+        return '<li>' + md(d.date) + '：' + parts.join('・') + '</li>';
+      }).join('') + '</ul>';
+      if (S.me.isAdmin) {
+        h += '<div class="ev-partial">半日・時間の指定：<b>' + (a.partial ? '受け付ける' : '受け付けない（参加・参加しないだけ）') + '</b> ' +
+          '<button type="button" class="mini ghost2" data-act="answer-partial" data-key="' + ev.key + '" data-on="' + (a.partial ? '0' : '1') + '"' + (S.evBusy ? ' disabled' : '') + '>' +
+          (a.partial ? '受け付けないにする' : '受け付けるにする') + '</button></div>';
+      }
     }
     return h;
   }

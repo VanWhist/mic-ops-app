@@ -439,3 +439,24 @@ h2 { font-size: 15px; margin: 18px 0 6px; }
 .pl-people label { display: flex; align-items: center; gap: 4px; min-height: 40px; }
 .pl-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 14px 0 6px; }
 .danger-link { color: var(--ng) !important; }
+
+/* 参加の回答：日ごと＋半日＋時間指定（v15〜） */
+.ans-ath { border-top: 1px solid var(--line); padding: 8px 0 6px; }
+.ans-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.ans-saved { color: var(--muted); }
+.ans-day { padding: 4px 0; }
+.ans-date { display: block; font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+.ans-kinds { display: flex; flex-wrap: wrap; gap: 4px; }
+.ans-k { min-height: 40px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); font-size: 14px; }
+.ans-k.on { background: var(--o); color: #fff; border-color: var(--o); font-weight: 700; }
+.ans-k.no.on { background: #6b7280; border-color: #6b7280; }
+.ans-k:disabled, .ans-save:disabled, .ans-sub:disabled { opacity: .5; }
+.ans-time { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.ans-time select { font-size: 16px; min-height: 40px; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; background: #fff; }
+.ans-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ans-save { min-height: 44px; padding: 6px 16px; border-radius: 8px; border: 0; background: var(--accent); color: #fff; font-weight: 700; font-size: 15px; }
+.ans-sub { min-height: 44px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: #fff; color: var(--accent); font-size: 14px; }
+.ev-days { list-style: none; margin: 2px 0 4px; padding: 0; font-size: 13px; }
+.ev-days li { padding: 1px 0; }
+.ev-partial { font-size: 13px; color: var(--muted); margin: 2px 0 4px; }
+.mini.ghost2 { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
