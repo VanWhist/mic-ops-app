@@ -2368,6 +2368,13 @@
     });
     byId('aiFab').addEventListener('click', function () { openAi(true); });
     byId('aiSize').addEventListener('click', function () { setAiSize(S.aiSize === 'large' ? 'small' : 'large', true); });
+    // 小さい枠では注意書きを1行に縮める。［ⓘ］で全文を出し入れする（大きくしたときは、いつも全文）
+    byId('aiWarnMore').addEventListener('click', function () {
+      var open = !byId('aiPanel').classList.contains('warn-open');
+      byId('aiPanel').classList.toggle('warn-open', open);
+      byId('aiWarnMore').setAttribute('aria-expanded', open ? 'true' : 'false');
+      byId('aiWarnMore').setAttribute('aria-label', open ? '注意書きをたたむ' : '注意書きをすべて表示');
+    });
     setAiSize(loadAiSize(), false);
     setupMic();
     byId('aiClose').addEventListener('click', function () { openAi(false); });
