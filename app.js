@@ -593,8 +593,11 @@
     scheduleFlush(0);
   }
 
-  // ---------------------------------------------------------------- 「自分の予定」に合宿・大会（v13〜）
-  // settings の events_on_input に入っている人だけ（いまは城さん S001）。タイトルと日付だけ（説明文は受け取らない）
+  // ---------------------------------------------------------------- 入力カレンダーに練習会・合宿・大会（v13〜、v17〜全スタッフと家族・練習会も）
+
+  /** 予定の種類 → 帯の色（練習会＝緑、合宿＝紫、大会＝橙） */
+  function inEvClass(type) { return type === '大会' ? 'ev-comp' : type === '練習' ? 'ev-prac' : 'ev-camp'; }
+  // settings の events_on_input の人（既定 ALL＝全スタッフと家族。S001 にすれば城さんだけ）。タイトルと日付だけ（説明文は受け取らない）
 
   function loadInputEvents(month) {
     S.inEv = S.inEv || {};
@@ -632,9 +635,9 @@
     var box = byId('inEvList');
     var list = (S.me.eventsOnInput && S.inEv && S.inEv[S.month]) || [];
     box.hidden = !list.length;
-    box.innerHTML = list.length ? '<span class="lbl">この月の合宿・大会</span>' + list.map(function (ev) {
+    box.innerHTML = list.length ? '<span class="lbl">この月の練習会・合宿・大会</span>' + list.map(function (ev) {
       var a = ev.dates[0], b = ev.dates[ev.dates.length - 1];
-      return '<span class="item"><span class="sw ' + (ev.type === '大会' ? 'ev-comp' : 'ev-camp') + '">' + esc(ev.type) + '</span>' +
+      return '<span class="item"><span class="sw ' + inEvClass(ev.type) + '">' + esc(ev.type === '練習' ? '練習会' : ev.type) + '</span>' +
         esc(md(a) + (b !== a ? '〜' + md(b) : '')) + ' ' + esc(ev.title) + '</span>';
     }).join('') : '';
   }
@@ -688,7 +691,7 @@
       html += '<button type="button" class="' + cls.join(' ') + '" data-date="' + d + '" aria-label="' + esc(label) + '">' +
         '<span class="dn">' + parts(d)[2] + '</span><span class="mk">' + esc(v.s) + '</span>' +
         (v.n ? '<span class="nd" aria-hidden="true"></span>' : '') +
-        (evs.length ? '<span class="dev ' + (evs[0].type === '大会' ? 'ev-comp' : 'ev-camp') + '" aria-hidden="true">' + esc(shortTitle(evs[0].title)) + (evs.length > 1 ? '+' + (evs.length - 1) : '') + '</span>' : '') +
+        (evs.length ? '<span class="dev ' + inEvClass(evs[0].type) + '" aria-hidden="true">' + esc(shortTitle(evs[0].title)) + (evs.length > 1 ? '+' + (evs.length - 1) : '') + '</span>' : '') +
         '</button>';
     });
     cal.innerHTML = html;
