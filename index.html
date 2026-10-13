@@ -160,6 +160,16 @@
       </div>
       <p id="calInfo" class="ev-status" role="status" aria-live="polite"></p>
     </div>
+    <details id="joinImportBox" class="deacon" hidden>
+      <summary>カレンダーの参加者を取り込む</summary>
+      <p class="hint">「MICスケジュール」の説明欄で「参加」「不参加」の下に書いた選手名を、アプリの参加の回答に入れます。登録済みの選手だけで、家族がアプリで回答済みの選手は上書きしません。「（23日のみ）」はその日だけ参加、「（1日のみ）」「（調整中）」など日が決まらないものは取り込みません。</p>
+      <div class="cal-bar-row">
+        <button id="jiCheck" type="button" class="secondary">照合する</button>
+        <button id="jiApply" type="button" class="primary" hidden>取り込む</button>
+      </div>
+      <p id="jiMsg" class="ev-status" role="status" aria-live="polite"></p>
+      <ul id="jiList" class="deacon-list ji-list"></ul>
+    </details>
     <details id="deaconBox" class="deacon" hidden>
       <summary>Deacon 指導日 <span id="deaconCount" class="muted"></span></summary>
       <p class="hint">登録すると予定に入り、カレンダーには「【仮】」付きで反映します。「確定にする」で「練習会」の括りになります。</p>

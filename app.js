@@ -979,6 +979,11 @@
     byId('dcDate').min = months[0] + '-01';
     byId('dcDate').max = months[months.length - 1] + '-31';
     byId('calSyncBtn').addEventListener('click', runCalSync);
+    byId('joinImportBox').hidden = false;
+    byId('jiCheck').addEventListener('click', function () { runJoinImport(false); });
+    byId('jiApply').addEventListener('click', function () {
+      if (confirm('照合結果の「取り込む」の選手を、参加の回答に入れますか？')) runJoinImport(true);
+    });
     byId('dcAdd').addEventListener('click', function () {
       deaconOp('deaconSave', { date: byId('dcDate').value, start: byId('dcStart').value, end: byId('dcEnd').value, venue: byId('dcVenue').value }, function () {
         byId('dcDate').value = ''; byId('dcStart').value = ''; byId('dcEnd').value = '';
@@ -1040,6 +1045,62 @@
     }, function (e) {
       S.calMsg = { kind: 'ng', text: '⚠ 反映できませんでした：' + e.message };
     }).then(function () { S.calBusy = false; renderCalBar(); });
+  }
+
+  // ---------------------------------------------------------------- カレンダーの参加者の取り込み（v24〜）
+  //
+  // ★ 照合する＝何を取り込むかを見るだけ（書かない）。取り込む＝照合の結果を回答に入れる（サーバーでもう一度照合する）
+
+  function jiDays(x, ev) {
+    var on = x.days.filter(function (d) { return d.kind !== '不参加'; });
+    if (!on.length) return '不参加';
+    if (on.length === ev.dates.length) return '参加';
+    return '参加（' + on.map(function (d) { return (+d.date.slice(5, 7)) + '/' + (+d.date.slice(8, 10)); }).join('・') + '）';
+  }
+
+  function renderJoinImport(r) {
+    var list = byId('jiList');
+    var total = 0;
+    var evs = (r.events || []).filter(function (ev) { return ev.add.length || ev.skipped.length || ev.unknown.length; });
+    list.innerHTML = evs.map(function (ev) {
+      total += ev.add.length;
+      var d0 = ev.dates[0], d1 = ev.dates[ev.dates.length - 1];
+      var when = (+d0.slice(5, 7)) + '/' + (+d0.slice(8, 10)) + (d1 !== d0 ? '〜' + (+d1.slice(5, 7)) + '/' + (+d1.slice(8, 10)) : '');
+      var h = '<li><div class="ji-title">' + esc(when + ' ' + ev.title) + ' <span class="muted">' + esc(ev.type) + (ev.open ? '' : '・受付前') + '</span></div>';
+      if (ev.add.length) h += '<div class="ji-row">' + (r.applied ? '✓ 取り込んだ：' : '取り込む：') + ev.add.map(function (x) { return esc(x.name + ' ' + jiDays(x, ev)); }).join('、') + '</div>';
+      ev.skipped.forEach(function (x) { h += '<div class="ji-row muted">取り込まない：' + esc(x.name) + '（' + esc(x.reason) + '）</div>'; });
+      if (ev.unknown.length) h += '<div class="ji-row muted">登録が見つからない名前：' + esc(ev.unknown.join('、')) + '</div>';
+      return h + '</li>';
+    }).join('');
+    return total;
+  }
+
+  function runJoinImport(apply) {
+    if (S.jiBusy) return;
+    S.jiBusy = true;
+    var msg = byId('jiMsg');
+    byId('jiCheck').disabled = true; byId('jiApply').disabled = true;
+    msg.textContent = apply ? '取り込み中…' : '照合中…（カレンダーを読むので少しかかります）'; msg.className = 'ev-status busy';
+    api('importCalendarJoins', { apply: apply }, CAL_SYNC_TIMEOUT_MS).then(function (r) {
+      var n = renderJoinImport(r);
+      if (apply) {
+        msg.textContent = '✓ ' + r.written + '名分を取り込みました。カレンダーにも載せるときは「カレンダーに反映」を押してください';
+        msg.className = 'ev-status ok';
+        byId('jiApply').hidden = true;
+        if (S.cal) S.cal.dirty = true;
+        S.calMsg = null;
+        renderCalBar();
+        loadEvents(S.month, true);
+      } else {
+        msg.textContent = n ? '取り込めるのは ' + n + '名分です。よければ「取り込む」を押してください' : '取り込むものはありません';
+        msg.className = 'ev-status';
+        byId('jiApply').hidden = !n;
+        byId('jiApply').textContent = '取り込む（' + n + '名分）';
+      }
+    }, function (e) {
+      msg.textContent = '⚠ できませんでした：' + (/不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message);
+      msg.className = 'ev-status ng';
+    }).then(function () { S.jiBusy = false; byId('jiCheck').disabled = false; byId('jiApply').disabled = false; });
   }
 
   function deaconOp(action, payload, done) {
