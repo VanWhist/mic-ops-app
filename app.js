@@ -195,7 +195,9 @@
       if (!res.ok) throw new Error('サーバーが応答しませんでした（' + res.status + '）');
       return res.json().catch(function () { throw new Error('サーバーの応答を読めませんでした'); });
     }, function (e) {
-      throw new Error(e && e.name === 'AbortError' ? '時間内に応答がありませんでした' : '通信できませんでした。電波の状態を確認してください');
+      var err = new Error(e && e.name === 'AbortError' ? '時間内に応答がありませんでした' : '通信できませんでした。電波の状態を確認してください');
+      if (e && e.name === 'AbortError') err.code = 'timeout';
+      throw err;
     }).then(function (data) {
       if (!data || data.ok !== true) {
         var err = new Error((data && data.message) || 'うまくいきませんでした');
@@ -2799,7 +2801,7 @@
   // ★ 音声入力（v19〜）：ブラウザの音声認識（ja-JP）で、話した言葉を入力欄に入れるだけ。送るのは［送る］を押したとき。
   //   使えないブラウザではマイクボタンを出さず、キーボードのマイクで話せることを出す。
 
-  var AI_TIMEOUT_MS = 120000;   // Claude を何回か呼ぶので、ふつうの操作より長く待つ
+  var AI_TIMEOUT_MS = window.MIC_AI_TIMEOUT_MS || 60000;   // MIC_AI_TIMEOUT_MS は通しテスト用（ふだんは無い）    // Claude を何回か呼ぶので、ふつうの操作より長く待つ。60秒で打ち切り「もう一度送って」と出す（v25.1〜。サーバー側も約50秒で切り上げる）
   var AI_EXAMPLES = {
     staff: ['11/7に空いている人は？', '12月に未入力の人は？', '12/13の担当は？'],
     family: ['次の練習会はいつ？', '参加の受付中の予定は？', '12月の土日を○にして']
@@ -3029,7 +3031,8 @@
       }
     }, function (e) {
       turn.error = true;
-      turn.a = e.code === 'forbidden' && S.family ? 'サーバー側（Apps Script）がまだ古い版のため、Haiku君を使えません' : e.message;
+      turn.a = e.code === 'timeout' ? '時間がかかっています。もう一度送ってください（1件ずつ頼むと早くなります）'
+        : e.code === 'forbidden' && S.family ? 'サーバー側（Apps Script）がまだ古い版のため、Haiku君を使えません' : e.message;
     }).then(function () {
       turn.busy = false;
       S.aiBusy = false;
