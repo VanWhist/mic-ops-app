@@ -319,8 +319,24 @@
 
   // ================================================================ 起動
 
+  // ---------------------------------------------------------------- 画面の版（v25.1〜）
+  // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
+  //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
+  var APP_VERSION = '20261014b';
+  var versionCheckedAt = 0;
+  function checkVersion() {
+    if (DEMO || Date.now() - versionCheckedAt < 300000) return;
+    versionCheckedAt = Date.now();
+    fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(function (res) { return res.ok ? res.json() : null; }).then(function (v) {
+      if (v && v.version && v.version !== APP_VERSION) byId('updateBanner').hidden = false;
+    }, function () { /* 読めなくても何もしない */ });
+  }
+
   function start() {
     if (DEMO) show('demoBanner');
+    byId('updateReload').addEventListener('click', function () { location.reload(); });
+    checkVersion();
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) checkVersion(); });
     if (!token) return fatal('URLが正しくありません。管理者から届いたURLをそのまま開いてください。');
     window.addEventListener('beforeunload', function (ev) {
       if (pendingCount() || S.inflight) { ev.preventDefault(); ev.returnValue = ''; }
@@ -3127,7 +3143,18 @@
       '<b>担当の変更案（' + p.changes.length + '件）</b>' + (p.summary ? '<div class="muted">' + esc(p.summary) + '</div>' : '') + body + foot + '</div>';
   }
 
+  var KNOWN_PROPOSALS = ['avail', 'athAvail', 'answer', 'assign'];
+
+  /** 変更案の表示。知らない種類・形の違う案は、反映ボタンを出さずに「再読み込みして」とだけ出す（v25.1〜。止まらないように） */
   function proposalHtml(t, i) {
+    var p = t.proposal;
+    var unknown = '<div class="ai-prop done"><b>変更案</b><p class="ai-prop-msg">この案はこの画面では表示できません。画面を再読み込みして、もう一度頼んでください（保存していません）。</p></div>';
+    if (!p || (p.kind && KNOWN_PROPOSALS.indexOf(p.kind) < 0)) return unknown;
+    try { return proposalHtmlKnown(t, i); }
+    catch (e) { return unknown; }
+  }
+
+  function proposalHtmlKnown(t, i) {
     var p = t.proposal;
     if (p.kind === 'assign') return assignProposalHtml(t, i);
     var answer = p.kind === 'answer';
