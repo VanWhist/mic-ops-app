@@ -336,6 +336,11 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .ai-prop td.to { font-weight: 700; font-size: 16px; }
 .ai-prop th, .ai-prop td:first-child, .ai-prop td.to { white-space: nowrap; }
 .ai-prop-acts { display: flex; gap: 12px; align-items: center; }
+.ai-asg { border-top: 1px solid var(--line); padding: 6px 0; }
+.ai-asg-days { list-style: none; margin: 4px 0; padding: 0; }
+.ai-asg-days li { padding: 2px 0; }
+.ai-asg-days li.off { color: var(--muted); }
+.ai-asg-days li.warn { color: var(--ng); font-weight: 700; }
 .ai-prop-acts .primary { min-height: 44px; }
 .ai-prop-msg { margin: 4px 0 0; }
 .ai-prop-msg.ok { color: var(--o); font-weight: 700; } .ai-prop-msg.ng { color: var(--ng); } .ai-prop-msg.busy { color: var(--muted); }

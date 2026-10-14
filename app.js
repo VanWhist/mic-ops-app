@@ -3070,7 +3070,12 @@
     api('aiApply', { proposalId: turn.proposal.id }).then(function (r) {
       turn.pstate = 'saved';
       turn.savedCount = r.saved.length;
-      if (r.kind === 'answer') {
+      if (r.kind === 'assign') {
+        // 担当（v25〜・管理者）：保存した予定だけカレンダーに反映済み。予定の一覧と反映の状態を読み直す
+        turn.cal = r.calendar || {};
+        if (S.month) loadEvents(S.month, true);
+        loadCalStatus();
+      } else if (r.kind === 'answer') {
         // 参加の回答：返ってきた「練習会など」で描き直す。同じ予定・選手の下書きは、保存した内容から作り直す
         S.upcoming = { status: 'ok', data: r.upcoming };
         (r.athleteIds || []).forEach(function (x) { if (S.ansDraft) delete S.ansDraft[r.eventKey + '|' + x]; });
@@ -3085,8 +3090,43 @@
     }).then(renderAi);
   }
 
+
+  /** 担当の変更案（v25〜・管理者）：予定・スタッフ・役割・来る日・その人の○△×・注意 */
+  function assignProposalHtml(t, i) {
+    var p = t.proposal;
+    var body = p.changes.map(function (c) {
+      var range = md(c.dates[0]) + (c.dates.length > 1 ? '〜' + md(c.dates[c.dates.length - 1]) : '');
+      var days = c.availability.map(function (a) {
+        var mark = a.status + (a.note ? '（' + a.note + '）' : '');
+        return '<li class="' + (a.on ? 'on' : 'off') + (a.on && (a.status === '×' || a.status === '未入力') ? ' warn' : '') + '">' +
+          esc(md(a.date) + '(' + a.weekday + ') ' + (c.op === 'remove' ? '' : a.on ? '来る' : '来ない') + '　○△×：' + mark) + '</li>';
+      }).join('');
+      return '<div class="ai-asg"><div class="ai-asg-head"><b>' + esc(c.title) + '</b> <span class="muted">' + esc(range + '・' + c.type) + '</span></div>' +
+        '<div>' + esc(c.name + 'さん：' + c.opLabel) + '</div><ul class="ai-asg-days">' + days + '</ul>' +
+        c.warnings.map(function (w) { return '<p class="ai-prop-msg ng">⚠ ' + esc(w) + '</p>'; }).join('') + '</div>';
+    }).join('');
+    var foot;
+    if (t.pstate === 'pending') {
+      foot = '<div class="ai-prop-acts"><button type="button" class="primary" data-act="apply" data-i="' + i + '">反映</button>' +
+        '<button type="button" class="link-btn" data-act="cancel" data-i="' + i + '">やめる</button></div>' +
+        '<p class="hint">［反映］で担当を保存し、この予定だけを「MIC 予定（アプリ）」に反映します。</p>';
+    } else if (t.pstate === 'saving') foot = '<p class="ai-prop-msg busy">保存・反映中…</p>';
+    else if (t.pstate === 'saved') {
+      var c = t.cal || {};
+      foot = '<p class="ai-prop-msg ok">✓ 担当を保存しました（' + t.savedCount + '件）</p>' +
+        (c.error ? '<p class="ai-prop-msg ng">⚠ ' + esc(c.error) + '</p>'
+          : '<p class="ai-prop-msg ok">✓ カレンダーに反映しました（作成' + (c.created || 0) + '・更新' + (c.updated || 0) + (c.unchanged ? '・変更なし' + c.unchanged : '') + (c.skipped ? '・反映しない種類' + c.skipped : '') + (c.failed ? '・失敗' + c.failed : '') + '）</p>');
+    }
+    else if (t.pstate === 'cancelled') foot = '<p class="ai-prop-msg">やめました（保存していません）</p>';
+    else foot = '<p class="ai-prop-msg">この案は使えません（保存していません）</p>';
+    if (t.perr) foot += '<p class="ai-prop-msg ng">⚠ ' + esc(t.perr) + '</p>';
+    return '<div class="ai-prop' + (t.pstate === 'pending' || t.pstate === 'saving' ? '' : ' done') + '">' +
+      '<b>担当の変更案（' + p.changes.length + '件）</b>' + (p.summary ? '<div class="muted">' + esc(p.summary) + '</div>' : '') + body + foot + '</div>';
+  }
+
   function proposalHtml(t, i) {
     var p = t.proposal;
+    if (p.kind === 'assign') return assignProposalHtml(t, i);
     var answer = p.kind === 'answer';
     var rows = p.days.map(function (d) {
       var md = (+d.date.slice(5, 7)) + '/' + (+d.date.slice(8, 10)) + '(' + d.weekday + ')';
