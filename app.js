@@ -322,7 +322,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261014d';
+  var APP_VERSION = '20261014e';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -1169,6 +1169,7 @@
       loadEvents(S.month, true, true);
     });
     byId('tab-events').addEventListener('change', function (e) {
+      if (S.evLg && lodgingEdChange(S.evLg, e.target, renderEvents)) return;   // 宿泊を設定（v27〜）
       if (e.target.dataset && e.target.dataset.keep) S.selKeep[e.target.dataset.keep] = e.target.value;
       if (e.target.name === 'type') syncAbsentPick(e.target);
     });
@@ -1185,6 +1186,9 @@
         adminOp('setReplaced', { eventKey: key, replaced: rep });
         return;
       }
+      if (act === 'lg-edit') { evLgOpen(key); return; }   // 宿泊を設定（v27〜）
+      if (act === 'lg-cancel') { S.evLg = null; renderEvents(); return; }
+      if (act === 'lg-save') { evLgSave(key); return; }
       if (act === 'answer-partial') { adminOp('setAnswerPartial', { eventKey: key, partial: b.dataset.on === '1' }); return; }
       if (act === 'answer-open') {
         var on = b.dataset.open === '1';
@@ -2151,7 +2155,7 @@
       (S.family ? '' : absent
         ? '<div class="ev-assigned ev-absent">不在：' + (ev.absentees && ev.absentees.length ? ev.absentees.map(function (id) { return '<b>' + esc(nameOf(id)) + '</b>'; }).join('・') + (ev.absentFixed ? '✎' : '') : '<span class="muted">（未定）</span>') + '</div>'
         : '<div class="ev-assigned">担当：' + assigned + '</div>') +
-      participantsHtml(ev) + lodgingHtml(ev);
+      participantsHtml(ev) + lodgingHtml(ev) + evLgHtml(ev);
     if (S.me.isAdmin) {
       h += '<button type="button" class="ev-open' + (open ? ' is-open' : '') + '" data-act="open" data-key="' + ev.key + '">' +
         (open ? '閉じる ▴' : absent
@@ -2769,7 +2773,7 @@
     var box = byId('lgAdmin');
     if (!box || !S.me || !S.me.isAdmin) return;
     var f = S.lgForm || LG_EMPTY, dis = S.lgaBusy ? ' disabled' : '';
-    var h = '<h3>宿（宿泊の出欠）</h3><p class="hint">白馬の拠点などをここで登録しておくと、計画タブの予定の編集で選べます。大会の宿は予定の編集から新しく登録することもできます（ここにも残ります）。料金の計算はしません。</p>';
+    var h = '<h3>宿（宿泊の出欠）</h3><p class="hint">白馬の拠点などをここで登録しておくと、計画タブの予定の編集や「予定と担当」の［宿泊を設定］で選べます。大会の宿は予定の編集から新しく登録することもできます（ここにも残ります）。料金の計算はしません。</p>';
     if (S.lgaMsg) h += '<p class="ev-status ' + S.lgaMsg.kind + '">' + esc(S.lgaMsg.text) + '</p>';
     h += '<ul class="staff-list lga-list">' + (S.lodgings || []).map(function (l) {
       return '<li class="' + (l.active ? '' : 'off') + '"><span class="nm">' + esc(l.name) + ' <small>（' + esc(l.kind) + (l.dinner ? '・夕食あり' : '') + (l.breakfast ? '・朝食あり' : '') + (l.active ? '' : '・無効') + '）</small></span>' +
@@ -2830,17 +2834,21 @@
   }
 
   function planLodgingChange(t) {
-    var ed = S.plan.ed, f = t.dataset.lgp;
-    if (!ed) return false;
+    return S.plan.ed ? lodgingEdChange(S.plan.ed, t, renderPlanEditor) : false;
+  }
+
+  /** 宿泊の欄の入力（計画タブの予定の編集と、予定と担当の［宿泊を設定］（v27〜）で共通）。rerender で描き直す */
+  function lodgingEdChange(ed, t, rerender) {
+    var f = t.dataset.lgp;
     if (t.dataset.lgn) { ed.lodging.newL[t.dataset.lgn] = t.type === 'checkbox' ? t.checked : t.value; return true; }
     if (!f) return false;
     var lg = ed.lodging = ed.lodging || { on: false, lodgingId: '', nights: [], deadline: '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }) };
     if (f === 'on') {
       lg.on = t.checked;
       if (lg.on && !lg.nights.length) lg.nights = lgDefaultNights(ed);
-      if (lg.on && !S.lodgings) loadLodgings(renderPlanEditor);
-      renderPlanEditor();
-    } else if (f === 'lodgingId') { lg.lodgingId = t.value; renderPlanEditor(); }
+      if (lg.on && !S.lodgings) loadLodgings(rerender);
+      rerender();
+    } else if (f === 'lodgingId') { lg.lodgingId = t.value; rerender(); }
     else if (f === 'night') {
       var i = lg.nights.indexOf(t.value);
       if (t.checked && i < 0) lg.nights.push(t.value); else if (!t.checked && i >= 0) lg.nights.splice(i, 1);
@@ -2862,6 +2870,46 @@
       out.newLodging = lg.newL;
     } else out.lodgingId = lg.lodgingId;
     return out;
+  }
+
+  // ---------------------------------------------------------------- 予定と担当：予定の宿泊（v27〜・管理者だけ）
+  //
+  // ★ 計画タブと同じ欄（planLodgingHtml）。カレンダーの予定（MICスケジュール）にも付けられる（サーバーの setEventLodging）
+  // ★ アプリの予定は、どちらのタブで設定しても同じ（app_events の同じ行）
+
+  function evLgAllowed(ev) {
+    return PARTIAL_DEFAULT.hasOwnProperty(ev.type) && ev.cal !== 'Deacon' && ev.cal !== 'レッスン' && !ev.cancelled && !ev.replaced && ev.appStatus !== '中止';
+  }
+
+  function evLgHtml(ev) {
+    if (!S.me.isAdmin || !evLgAllowed(ev)) return '';
+    var dis = S.evBusy ? ' disabled' : '';
+    if (!S.evLg || S.evLg.key !== ev.key) {
+      return '<div class="ev-lg-btn"><button type="button" class="mini ghost2" data-act="lg-edit" data-key="' + esc(ev.key) + '"' + dis + '>' + (ev.lodging ? '宿泊を直す' : '宿泊を設定') + '</button></div>';
+    }
+    return '<section class="ev-lg-ed">' + planLodgingHtml(S.evLg) +
+      '<div class="url-actions"><button type="button" class="primary" data-act="lg-save" data-key="' + esc(ev.key) + '"' + dis + '>宿泊を保存</button>' +
+      '<button type="button" class="link-btn" data-act="lg-cancel" data-key="' + esc(ev.key) + '"' + dis + '>やめる</button></div></section>';
+  }
+
+  function evLgOpen(key) {
+    var ev = (((S.events[S.month] || {}).data || {}).events || []).filter(function (x) { return x.key === key; })[0];
+    if (!ev) return;
+    var l = ev.lodging;
+    S.evLg = { key: key, type: ev.type, startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1] };
+    S.evLg.lodging = { on: true, lodgingId: l ? l.id : '', nights: l ? l.nights.slice() : [], deadline: l ? l.deadline || '' : '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }) };
+    if (!S.evLg.lodging.nights.length) S.evLg.lodging.nights = lgDefaultNights(S.evLg);
+    if (!S.lodgings) loadLodgings(renderEvents);
+    renderEvents();
+  }
+
+  function evLgSave(key) {
+    var ed = S.evLg;
+    if (!ed || ed.key !== key) return;
+    var body;
+    try { body = planLodgingBody(ed); } catch (e) { S.evMsg = { kind: 'ng', text: '⚠ ' + e.message }; renderEvents(); return; }
+    if (body === null && !window.confirm('この予定の宿泊を外します。\n家族・スタッフの宿泊の欄が消えます（それまでの回答は残ります）。よろしいですか？')) return;
+    adminOp('setEventLodging', { eventKey: key, lodging: body }, function () { S.evLg = null; if (body && body.newLodging) S.lodgings = null; });
   }
 
   // ================================================================ AI（管理者・スタッフ・家族。v18〜 右下の丸いボタンで開くチャット）

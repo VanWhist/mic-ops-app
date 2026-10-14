@@ -587,3 +587,7 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 
 /* 期間の外の日（calendar_end より後。v23〜） */
 .cal .day.out { opacity: .35; }
+/* 予定と担当：宿泊を設定（v27〜・管理者だけ） */
+.ev-lg-btn { margin: 6px 0; }
+.ev-lg-ed { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: #fafcff; }
+.ev-lg-ed .pl-h { font-size: 15px; margin: 0 0 6px; }
