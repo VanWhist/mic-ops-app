@@ -322,7 +322,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261014c';
+  var APP_VERSION = '20261014d';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -385,6 +385,7 @@
     setupLodgingAdmin();
     setupAi();
     setupCalSync();
+    setupBulkOpen();
     renderAll();
     if (S.tab === 'events' || S.family) loadEvents(S.month);   // 家族は「参加しますか？」の件数をタブに出すため最初に読む
   }
@@ -1488,6 +1489,64 @@
   }
 
   /** 管理者の操作。成功したらサーバーが返した月の予定で描き直す。then は続けて行う操作 */
+  // ---------------------------------------------------------------- 受付前の予定をまとめて受付開始（v26〜・管理者だけ）
+  //
+  // ★ 対象：表示中の月の予定のうち、練習会・合宿・大会で、終了していない受付前のもの（下書き・中止・置き換え済みは除く）
+  // ★ 押すと件数と予定名の一覧を出し、［始める］で保存。サーバーでももう一度確かめる（setAnswerOpenMany）
+
+  function bulkOpenTargets(data) {
+    var today = todayJst();
+    return (data.events || []).filter(function (ev) {
+      return ev.answers && !ev.answers.open && !ev.cancelled && !ev.replaced && ev.appStatus !== '下書き' && ev.dates[ev.dates.length - 1] >= today;
+    });
+  }
+
+  function renderBulkOpen(data) {
+    var bar = byId('bulkOpenBar');
+    bar.hidden = !S.me.isAdmin;
+    if (bar.hidden) return;
+    var list = bulkOpenTargets(data);
+    var btn = byId('bulkOpenBtn');
+    btn.disabled = !list.length || !!S.evBusy;
+    btn.textContent = '受付前の予定をまとめて受付開始' + (list.length ? '（' + list.length + '件）' : '');
+    byId('bulkOpenInfo').textContent = list.length ? '' : '対象がありません';
+    var box = byId('bulkOpenConfirm');
+    if (!S.bulkConfirm || !list.length) { box.hidden = true; box.innerHTML = ''; S.bulkConfirm = false; return; }
+    box.hidden = false;
+    box.innerHTML = '<b>次の' + list.length + '件の参加の受付を始めます</b><ul>' + list.map(function (ev) {
+      return '<li>' + esc(evDateLabel(ev) + ' ' + ev.title) + '</li>';
+    }).join('') + '</ul><div class="acts"><button type="button" class="primary" data-bulk="go"' + (S.evBusy ? ' disabled' : '') + '>始める</button>' +
+      '<button type="button" class="link-btn" data-bulk="cancel">やめる</button></div>';
+  }
+
+  function setupBulkOpen() {
+    if (!S.me.isAdmin || S.bulkReady) return;
+    S.bulkReady = true;
+    byId('bulkOpenBtn').addEventListener('click', function () { S.bulkConfirm = true; renderEvents(); });
+    byId('bulkOpenConfirm').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-bulk]');
+      if (!b) return;
+      if (b.dataset.bulk === 'cancel') { S.bulkConfirm = false; renderEvents(); return; }
+      var data = (S.events[S.month] || {}).data;
+      if (!data || S.evBusy) return;
+      var keys = bulkOpenTargets(data).map(function (ev) { return ev.key; });
+      if (!keys.length) return;
+      var month = S.month;
+      S.bulkConfirm = false;
+      S.evBusy = true;
+      S.evMsg = { kind: 'busy', text: '受付を始めています…' };
+      renderEvents();
+      api('setAnswerOpenMany', { month: month, eventKeys: keys, open: true }).then(function (r) {
+        S.events[month] = { status: 'ok', data: r, at: Date.now() };
+        saveCache();
+        var b2 = r.bulk || { changed: [], skipped: [] };
+        S.evMsg = { kind: 'ok', text: '✓ ' + b2.changed.length + '件の参加の受付を始めました' + (b2.skipped.length ? '（' + b2.skipped.length + '件は変えませんでした：' + b2.skipped.map(function (x) { return (x.title || '不明') + '・' + x.reason; }).join('、') + '）' : '') };
+      }, function (e2) {
+        S.evMsg = { kind: 'ng', text: '⚠ 受付を始められませんでした：' + (/不明な操作/.test(e2.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e2.message) };
+      }).then(function () { S.evBusy = false; renderEvents(); });
+    });
+  }
+
   function adminOp(action, payload, then) {
     var month = S.month;
     S.evBusy = true;
@@ -1573,6 +1632,7 @@
       }).join('') + '</ul></div>';
     }
     byId('evOrphans').innerHTML = oh;
+    renderBulkOpen(data);
 
     var list = data.events;
     if (S.family) {   // 家族は「これから」の予定だけ
@@ -3089,7 +3149,11 @@
     api('aiApply', { proposalId: turn.proposal.id }).then(function (r) {
       turn.pstate = 'saved';
       turn.savedCount = r.saved.length;
-      if (r.kind === 'assign') {
+      if (r.kind === 'answerOpen') {
+        // 参加の受付（v26〜・管理者）：結果を出し、予定の一覧を読み直す
+        turn.openRes = r;
+        if (S.month) loadEvents(S.month, true);
+      } else if (r.kind === 'assign') {
         // 担当（v25〜・管理者）：保存した予定だけカレンダーに反映済み。予定の一覧と反映の状態を読み直す
         turn.cal = r.calendar || {};
         if (S.month) loadEvents(S.month, true);
@@ -3143,7 +3207,7 @@
       '<b>担当の変更案（' + p.changes.length + '件）</b>' + (p.summary ? '<div class="muted">' + esc(p.summary) + '</div>' : '') + body + foot + '</div>';
   }
 
-  var KNOWN_PROPOSALS = ['avail', 'athAvail', 'answer', 'assign'];
+  var KNOWN_PROPOSALS = ['avail', 'athAvail', 'answer', 'assign', 'answerOpen'];
 
   /** 変更案の表示。知らない種類・形の違う案は、反映ボタンを出さずに「再読み込みして」とだけ出す（v25.1〜。止まらないように） */
   function proposalHtml(t, i) {
@@ -3154,8 +3218,36 @@
     catch (e) { return unknown; }
   }
 
+  /** 参加の受付の変更案（v26〜・管理者）：始める／止める予定の名前と件数 */
+  function answerOpenProposalHtml(t, i) {
+    var p = t.proposal;
+    var verb = p.open ? '受付を始める' : '受付を止める';
+    var rows = p.items.map(function (x) {
+      var d = x.dates;
+      return '<li>' + esc(md(d[0]) + (d.length > 1 ? '〜' + md(d[d.length - 1]) : '') + ' ' + x.title) + ' <span class="muted">' + esc(x.type) + '</span></li>';
+    }).join('');
+    var foot;
+    if (t.pstate === 'pending') {
+      foot = '<div class="ai-prop-acts"><button type="button" class="primary" data-act="apply" data-i="' + i + '">反映</button>' +
+        '<button type="button" class="link-btn" data-act="cancel" data-i="' + i + '">やめる</button></div>';
+    } else if (t.pstate === 'saving') foot = '<p class="ai-prop-msg busy">保存中…</p>';
+    else if (t.pstate === 'saved') {
+      var r = t.openRes || { saved: [], skipped: [] };
+      foot = '<p class="ai-prop-msg ok">✓ ' + r.saved.length + '件の' + (p.open ? '受付を始めました' : '受付を止めました') + '</p>' +
+        (r.skipped && r.skipped.length ? '<p class="ai-prop-msg">変えなかった予定：' + esc(r.skipped.map(function (x) { return (x.title || '（不明）') + '（' + x.reason + '）'; }).join('、')) + '</p>' : '');
+    }
+    else if (t.pstate === 'cancelled') foot = '<p class="ai-prop-msg">やめました（保存していません）</p>';
+    else foot = '<p class="ai-prop-msg">この案は使えません（保存していません）</p>';
+    if (t.perr) foot += '<p class="ai-prop-msg ng">⚠ ' + esc(t.perr) + '</p>';
+    var skip = p.skipped && p.skipped.length ? '<p class="ai-prop-msg">対象外：' + esc(p.skipped.map(function (x) { return x.title + '（' + x.reason + '）'; }).join('、')) + '</p>' : '';
+    return '<div class="ai-prop' + (t.pstate === 'pending' || t.pstate === 'saving' ? '' : ' done') + '">' +
+      '<b>参加の' + verb + '変更案（' + p.items.length + '件）</b>' + (p.summary ? '<div class="muted">' + esc(p.summary) + '</div>' : '') +
+      '<ul class="ai-asg-days">' + rows + '</ul>' + skip + foot + '</div>';
+  }
+
   function proposalHtmlKnown(t, i) {
     var p = t.proposal;
+    if (p.kind === 'answerOpen') return answerOpenProposalHtml(t, i);
     if (p.kind === 'assign') return assignProposalHtml(t, i);
     var answer = p.kind === 'answer';
     var rows = p.days.map(function (d) {
