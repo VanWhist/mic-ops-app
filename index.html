@@ -8,7 +8,7 @@
 <meta name="format-detection" content="telephone=no">
 <title>MIC 予定</title>
 <meta name="apple-mobile-web-app-title" content="MIC 予定">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20261014b">
 </head>
 <body>
 <header class="top">
@@ -22,6 +22,11 @@
   </div>
 </header>
 
+<!-- 新しい版の画面が出ていたら再読み込みを促す（v25.1〜。古い画面のままだと新しい応答を表示できず止まることがある） -->
+<div id="updateBanner" class="banner stale" hidden role="status">
+  <span>新しい版の画面があります。</span>
+  <button id="updateReload" type="button">再読み込み</button>
+</div>
 <div id="demoBanner" class="banner demo" hidden>デモ表示です。名前は架空で、保存はこの端末の中だけです。</div>
 <div id="staleBanner" class="banner stale" hidden role="status">
   <span id="staleText"></span>
@@ -310,7 +315,7 @@
   </div>
 </section>
 
-<script src="config.js"></script>
-<script src="app.js"></script>
+<script src="config.js?v=20261014b"></script>
+<script src="app.js?v=20261014b"></script>
 </body>
 </html>

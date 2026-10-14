@@ -195,7 +195,9 @@
       if (!res.ok) throw new Error('サーバーが応答しませんでした（' + res.status + '）');
       return res.json().catch(function () { throw new Error('サーバーの応答を読めませんでした'); });
     }, function (e) {
-      throw new Error(e && e.name === 'AbortError' ? '時間内に応答がありませんでした' : '通信できませんでした。電波の状態を確認してください');
+      var err = new Error(e && e.name === 'AbortError' ? '時間内に応答がありませんでした' : '通信できませんでした。電波の状態を確認してください');
+      if (e && e.name === 'AbortError') err.code = 'timeout';
+      throw err;
     }).then(function (data) {
       if (!data || data.ok !== true) {
         var err = new Error((data && data.message) || 'うまくいきませんでした');
@@ -317,8 +319,24 @@
 
   // ================================================================ 起動
 
+  // ---------------------------------------------------------------- 画面の版（v25.1〜）
+  // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
+  //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
+  var APP_VERSION = '20261014b';
+  var versionCheckedAt = 0;
+  function checkVersion() {
+    if (DEMO || Date.now() - versionCheckedAt < 300000) return;
+    versionCheckedAt = Date.now();
+    fetch('version.json?t=' + Date.now(), { cache: 'no-store' }).then(function (res) { return res.ok ? res.json() : null; }).then(function (v) {
+      if (v && v.version && v.version !== APP_VERSION) byId('updateBanner').hidden = false;
+    }, function () { /* 読めなくても何もしない */ });
+  }
+
   function start() {
     if (DEMO) show('demoBanner');
+    byId('updateReload').addEventListener('click', function () { location.reload(); });
+    checkVersion();
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) checkVersion(); });
     if (!token) return fatal('URLが正しくありません。管理者から届いたURLをそのまま開いてください。');
     window.addEventListener('beforeunload', function (ev) {
       if (pendingCount() || S.inflight) { ev.preventDefault(); ev.returnValue = ''; }
@@ -2799,7 +2817,7 @@
   // ★ 音声入力（v19〜）：ブラウザの音声認識（ja-JP）で、話した言葉を入力欄に入れるだけ。送るのは［送る］を押したとき。
   //   使えないブラウザではマイクボタンを出さず、キーボードのマイクで話せることを出す。
 
-  var AI_TIMEOUT_MS = 120000;   // Claude を何回か呼ぶので、ふつうの操作より長く待つ
+  var AI_TIMEOUT_MS = window.MIC_AI_TIMEOUT_MS || 60000;   // MIC_AI_TIMEOUT_MS は通しテスト用（ふだんは無い）    // Claude を何回か呼ぶので、ふつうの操作より長く待つ。60秒で打ち切り「もう一度送って」と出す（v25.1〜。サーバー側も約50秒で切り上げる）
   var AI_EXAMPLES = {
     staff: ['11/7に空いている人は？', '12月に未入力の人は？', '12/13の担当は？'],
     family: ['次の練習会はいつ？', '参加の受付中の予定は？', '12月の土日を○にして']
@@ -3029,7 +3047,8 @@
       }
     }, function (e) {
       turn.error = true;
-      turn.a = e.code === 'forbidden' && S.family ? 'サーバー側（Apps Script）がまだ古い版のため、Haiku君を使えません' : e.message;
+      turn.a = e.code === 'timeout' ? '時間がかかっています。もう一度送ってください（1件ずつ頼むと早くなります）'
+        : e.code === 'forbidden' && S.family ? 'サーバー側（Apps Script）がまだ古い版のため、Haiku君を使えません' : e.message;
     }).then(function () {
       turn.busy = false;
       S.aiBusy = false;
@@ -3124,7 +3143,18 @@
       '<b>担当の変更案（' + p.changes.length + '件）</b>' + (p.summary ? '<div class="muted">' + esc(p.summary) + '</div>' : '') + body + foot + '</div>';
   }
 
+  var KNOWN_PROPOSALS = ['avail', 'athAvail', 'answer', 'assign'];
+
+  /** 変更案の表示。知らない種類・形の違う案は、反映ボタンを出さずに「再読み込みして」とだけ出す（v25.1〜。止まらないように） */
   function proposalHtml(t, i) {
+    var p = t.proposal;
+    var unknown = '<div class="ai-prop done"><b>変更案</b><p class="ai-prop-msg">この案はこの画面では表示できません。画面を再読み込みして、もう一度頼んでください（保存していません）。</p></div>';
+    if (!p || (p.kind && KNOWN_PROPOSALS.indexOf(p.kind) < 0)) return unknown;
+    try { return proposalHtmlKnown(t, i); }
+    catch (e) { return unknown; }
+  }
+
+  function proposalHtmlKnown(t, i) {
     var p = t.proposal;
     if (p.kind === 'assign') return assignProposalHtml(t, i);
     var answer = p.kind === 'answer';
