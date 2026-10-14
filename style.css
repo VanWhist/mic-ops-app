@@ -358,6 +358,13 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .ai-sug-list .mini { margin-top: 4px; }
 
 /* カレンダーへの反映・Deacon 指導日（管理者だけ） */
+.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 6px 0 10px; }
+.bulk-bar .secondary { min-height: 44px; padding: 8px 14px; border-radius: 8px; font-weight: 700; }
+.bulk-bar .secondary:disabled { opacity: .5; }
+.bulk-confirm { flex-basis: 100%; border: 2px solid var(--accent); background: var(--card); border-radius: 10px; padding: 10px; font-size: 14px; }
+.bulk-confirm ul { margin: 6px 0; padding-left: 1.2em; }
+.bulk-confirm .acts { display: flex; gap: 12px; align-items: center; }
+.bulk-confirm .primary { min-height: 44px; padding: 8px 18px; border-radius: 8px; font-weight: 700; }
 .cal-bar { border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 8px 10px; margin: 6px 0 10px; }
 .cal-bar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cal-bar .primary { min-height: 44px; }
