@@ -366,6 +366,10 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .deacon-form .primary { min-height: 44px; }
 .deacon-list { list-style: none; margin: 6px 0 0; padding: 0; }
 .deacon-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; border-top: 1px solid var(--line); padding: 6px 0; font-size: 14px; }
+#jiCheck, #jiApply { min-height: 44px; padding: 8px 16px; border-radius: 8px; font-weight: 700; }
+.ji-list li { display: block; }
+.ji-list .ji-title { font-weight: 700; }
+.ji-list .ji-row { margin: 2px 0 0 0.5em; }
 .dc-acts { margin-left: auto; display: flex; gap: 6px; }
 
 /* 不在（スタッフの不在期間） */
