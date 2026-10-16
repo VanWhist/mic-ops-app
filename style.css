@@ -622,3 +622,6 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .talk-form textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
 .talk-form-row { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
 #talkCount.over { color: #d93025; font-weight: 700; }
+/* 予定名を直す（v31〜） */
+.ev-orig { font-size: 13px; margin: -2px 0 4px; overflow-wrap: anywhere; }
+.ev-name input[name="evname"] { width: 100%; box-sizing: border-box; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }

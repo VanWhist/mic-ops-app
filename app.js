@@ -322,7 +322,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261016b';
+  var APP_VERSION = '20261016c';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -1223,6 +1223,15 @@
         adminOp('assign', { eventKey: b.dataset.to, staffId: b.dataset.staff, role: b.dataset.role, on: true }, function () {
           return { action: 'assign', payload: { eventKey: key, staffId: b.dataset.staff, role: b.dataset.role, on: false } };
         });
+      } else if (act === 'rename' || act === 'rename-reset') {
+        // 予定名（v31〜）：アプリで直した名前はカレンダーを読み直しても残る。元に戻すは元のカレンダーの名前へ
+        var nin = b.closest('.ev-meta').querySelector('input[name="evname"]');
+        var nm = act === 'rename-reset' ? '' : (nin.value || '').trim();
+        var ev1 = (((S.events[S.month] || {}).data || {}).events || []).filter(function (x) { return x.key === key; })[0];
+        if (act === 'rename' && !nm) { S.evMsg = { kind: 'ng', text: '予定名を入れてください（元の名前に戻すときは［元の名前に戻す］）' }; renderEvents(); return; }
+        if (act === 'rename' && ev1 && nm === ev1.title) { S.evMsg = { kind: 'ng', text: '予定名が変わっていません' }; renderEvents(); return; }
+        if (act === 'rename-reset' && !window.confirm('予定名を元の名前「' + (ev1 && ev1.titleOrig || '') + '」に戻します。よろしいですか？')) return;
+        adminOp('setEventName', { eventKey: key, name: nm });
       } else if (act === 'meta') {
         var box = b.closest('.ev-meta');
         var tsel = box.querySelector('select[name="type"]');
@@ -2154,6 +2163,7 @@
     var h = '<article class="ev' + (open ? ' open' : '') + (ev.appStatus === '下書き' ? ' draft' : '') + (ev.replaced || ev.cancelled ? ' dim' : '') + '" data-key="' + ev.key + '">' +
       '<div class="ev-date">' + evDateLabel(ev) + '</div>' +
       '<h3 class="ev-title">' + esc(ev.title) + '</h3>' +
+      (ev.titleFixed && ev.titleOrig ? '<div class="ev-orig muted">元の名前：' + esc(ev.titleOrig) + '</div>' : '') +   // 予定名を直した予定（v31〜）
       (ev.location ? '<div class="ev-loc">' + esc(ev.location) + '</div>' : '') +
       '<div class="badges">' + badges + '</div>' +
       (ev.memo && !S.family ? '<div class="ev-memo">メモ：' + esc(ev.memo) + '</div>' : '') +
@@ -2256,6 +2266,7 @@
     });
     if (busy.length) h += '<p class="rest">行けない・未回答：' + busy.join('、') + '</p>';
 
+    h += evNameHtml(ev);   // 予定名（v31〜）
     if (ev.cal === 'アプリ') {
       // アプリで作った予定は「計画」で直す（種類・名前・日時・会場・メモ・担当）
       h += '<div class="ev-meta"><h4>この予定を直す</h4><button type="button" class="mini" data-act="plan-edit" data-key="' + ev.key + '">計画で直す（日時・種類・担当など）</button></div>';
@@ -2281,6 +2292,18 @@
       }).join('') + '</fieldset>' +
       '<button type="button" class="mini" data-act="meta" data-key="' + ev.key + '"' + (S.evBusy ? ' disabled' : '') + '>直す</button></div>';
     return h + '</div>';
+  }
+
+  /** 予定名の欄（v31〜・管理者だけ）。アプリで直した名前は元のカレンダーを読み直しても残る */
+  function evNameHtml(ev) {
+    if (ev.cal === 'Deacon') return '';
+    var dis = S.evBusy ? ' disabled' : '';
+    return '<div class="ev-meta ev-name"><h4>予定名を直す</h4>' +
+      '<label>予定名 <input type="text" name="evname" maxlength="80" value="' + esc(ev.title) + '" aria-label="予定名"></label>' +
+      (ev.titleFixed ? '<p class="hint">元の名前：' + esc(ev.titleOrig) + '（カレンダーを読み直しても、アプリで直した名前を出します）</p>'
+        : '<p class="hint">' + (ev.cal === 'アプリ' ? '計画タブで直すのと同じです。' : 'アプリの中だけの名前です（元のカレンダーは変えません）。カレンダーを読み直しても、直した名前を出します。') + '</p>') +
+      '<button type="button" class="mini" data-act="rename" data-key="' + ev.key + '"' + dis + '>予定名を保存</button>' +
+      (ev.titleFixed ? ' <button type="button" class="link-btn" data-act="rename-reset" data-key="' + ev.key + '"' + dis + '>元の名前に戻す</button>' : '') + '</div>';
   }
 
   /** 全員から選ぶ：候補にいない人（希望しない・未回答・×・会場外）も担当にできる */
@@ -3512,7 +3535,11 @@
     api('aiApply', { proposalId: turn.proposal.id }).then(function (r) {
       turn.pstate = 'saved';
       turn.savedCount = (r.saved || []).length;
-      if (r.kind === 'calShare') {
+      if (r.kind === 'rename') {
+        // 予定名（v31〜・管理者）：予定の一覧と反映の状態を読み直す
+        if (S.month) loadEvents(S.month, true);
+        loadCalStatus();
+      } else if (r.kind === 'calShare') {
         // カレンダーの共有（v29〜・家族）：結果を出し、共有の欄を描き直す
         turn.shareRes = r;
         if (S.calShare) { S.calShare.shares = r.shares || S.calShare.shares; S.calShare.msg = null; }
@@ -3575,7 +3602,27 @@
       '<b>担当の変更案（' + p.changes.length + '件）</b>' + (p.summary ? '<div class="muted">' + esc(p.summary) + '</div>' : '') + body + foot + '</div>';
   }
 
-  var KNOWN_PROPOSALS = ['avail', 'athAvail', 'answer', 'assign', 'answerOpen', 'calShare'];
+  var KNOWN_PROPOSALS = ['avail', 'athAvail', 'answer', 'assign', 'answerOpen', 'calShare', 'rename'];
+
+  /** 予定名の変更案（v31〜・管理者）：前 → 後 */
+  function renameProposalHtml(t, i) {
+    var p = t.proposal;
+    var d = p.dates || [];
+    var foot;
+    if (t.pstate === 'pending') {
+      foot = '<div class="ai-prop-acts"><button type="button" class="primary" data-act="apply" data-i="' + i + '">反映</button>' +
+        '<button type="button" class="link-btn" data-act="cancel" data-i="' + i + '">やめる</button></div>' +
+        '<p class="hint">［反映］で予定名を保存します。カレンダーを読み直しても、アプリで直した名前を出します。</p>';
+    } else if (t.pstate === 'saving') foot = '<p class="ai-prop-msg busy">保存中…</p>';
+    else if (t.pstate === 'saved') foot = '<p class="ai-prop-msg ok">✓ 予定名を「' + esc(p.name) + '」にしました</p>';
+    else if (t.pstate === 'cancelled') foot = '<p class="ai-prop-msg">やめました（保存していません）</p>';
+    else foot = '<p class="ai-prop-msg">この案は使えません（保存していません）</p>';
+    if (t.perr) foot += '<p class="ai-prop-msg ng">⚠ ' + esc(t.perr) + '</p>';
+    return '<div class="ai-prop' + (t.pstate === 'pending' || t.pstate === 'saving' ? '' : ' done') + '">' +
+      '<b>予定名の変更案</b>' + (p.summary ? '<div class="muted">' + esc(p.summary) + '</div>' : '') +
+      '<div class="muted">' + esc((d.length ? md(d[0]) + (d.length > 1 ? '〜' + md(d[d.length - 1]) : '') + '・' : '') + (p.type || '')) + '</div>' +
+      '<div>前：' + esc(p.title) + '</div><div>後：<b>' + esc(p.name) + '</b></div>' + foot + '</div>';
+  }
 
   /** カレンダーの共有の変更案（v29〜・家族）：どのアドレスに、閲覧のみで共有する／外す */
   function calShareProposalHtml(t, i) {
@@ -3640,6 +3687,7 @@
     var p = t.proposal;
     if (p.kind === 'answerOpen') return answerOpenProposalHtml(t, i);
     if (p.kind === 'calShare') return calShareProposalHtml(t, i);
+    if (p.kind === 'rename') return renameProposalHtml(t, i);
     if (p.kind === 'assign') return assignProposalHtml(t, i);
     var answer = p.kind === 'answer';
     var rows = p.days.map(function (d) {
