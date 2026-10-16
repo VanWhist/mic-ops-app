@@ -591,3 +591,11 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .ev-lg-btn { margin: 6px 0; }
 .ev-lg-ed { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; background: #fafcff; }
 .ev-lg-ed .pl-h { font-size: 15px; margin: 0 0 6px; }
+/* カレンダーの共有（v29〜） */
+.cal-share .cs-list, .cs-admin { list-style: none; padding: 0; margin: 6px 0; }
+.cal-share .cs-list li, .cs-admin li { padding: 6px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.cs-admin li.inactive { opacity: .6; }
+.cs-mail { font-weight: 700; overflow-wrap: anywhere; }
+.cs-add input { flex: 1; min-width: 0; }
+.cs-admin-box { margin: 14px 0; }
+.cs-admin-box h3 { font-size: 15px; margin: 0 0 6px; }

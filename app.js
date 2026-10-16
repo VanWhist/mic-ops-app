@@ -322,7 +322,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261014e';
+  var APP_VERSION = '20261016a';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -446,6 +446,7 @@
       if (b) switchAthlete(b.dataset.ath);
     });
     byId('sibAll').addEventListener('change', function (e) { S.sibAll = e.target.checked; renderMine(); });
+    setupCalShare();   // カレンダーの共有（v29〜）
     document.querySelector('#tab-events .hint').textContent = 'これからの練習会・合宿・大会です。参加の受付中の予定は、選手ごと・日ごとに参加の仕方を選んで［この内容で保存］を押してください。';
     document.querySelector('#tab-events .month-nav').hidden = true;   // 月ごとではなく、これからの予定をまとめて出す
     byId('evList').addEventListener('click', function (e) {
@@ -2415,6 +2416,7 @@
 
   function loadFamilies() {
     if (!S.me.isAdmin) return;
+    loadCalShareAdmin();   // カレンダーの共有の一覧（v29〜）
     api('familyList').then(function (r) { S.families = r.families; setFamStatus('', ''); }, function (e) {
       setFamStatus('ng', /不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : '⚠ 読み込めませんでした：' + e.message);
     }).then(renderFamilies);
@@ -2521,6 +2523,116 @@
     }).join('');
     byId('addStaffBtn').disabled = !!S.stBusy;
     byId('reissueAdminBtn').disabled = !!S.stBusy;
+  }
+
+  // ================================================================ カレンダーの共有（v29〜・城さん決定 2026-10-16）
+  //
+  // ★ 家族：「練習会など」の「Googleカレンダーで見る」から、Gmailを足すと「MIC 予定（アプリ）」を閲覧のみで共有（即時。城さんには通知だけ）
+  // ★ 1家族2件まで。外せるのは自分がここで足したアドレスだけ（前から共有されていたものは「共有済み」で、外せない）
+  // ★ 足す・外す前に確認を出す。管理者は「管理」で一覧を見るだけ
+
+  function setupCalShare() {
+    var box = byId('calShareBox');
+    if (!box) return;
+    box.hidden = false;
+    box.addEventListener('toggle', function () { if (box.open && !S.calShare) loadCalShare(); });
+    box.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-cs]');
+      if (!b || b.disabled || (S.calShare && S.calShare.busy)) return;
+      if (b.dataset.cs === 'add') calShareAddClick();
+      else if (b.dataset.cs === 'remove') calShareRemoveClick(b.dataset.email);
+    });
+    box.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && e.target.id === 'csEmail') { e.preventDefault(); calShareAddClick(); }
+    });
+  }
+
+  function loadCalShare() {
+    S.calShare = S.calShare || { shares: [], max: 2 };
+    S.calShare.msg = { kind: 'busy', text: '読み込み中…' };
+    renderCalShare();
+    api('calShares').then(function (r) {
+      S.calShare.shares = r.shares; S.calShare.max = r.max; S.calShare.msg = null; S.calShare.loaded = true;
+    }, function (e) {
+      S.calShare.msg = { kind: 'ng', text: '⚠ 読み込めませんでした：' + (/この操作は家族のURLでは使えません/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message) };
+    }).then(renderCalShare);
+  }
+
+  function calShareEmailOk(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+
+  function calShareAddClick() {
+    var input = byId('csEmail');
+    var v = (input.value || '').trim();
+    if (!calShareEmailOk(v)) { S.calShare.msg = { kind: 'ng', text: '⚠ Gmailアドレスを入れてください（例：name@gmail.com）' }; renderCalShare(); return; }
+    if (!window.confirm(v + ' に、カレンダー「MIC 予定（アプリ）」を共有します（閲覧のみ）。\nすぐに共有され、城さんにもお知らせが届きます。よろしいですか？')) return;
+    calShareOp('calShareAdd', v, function (r) {
+      input.value = '';
+      return r.added && r.added.state === '共有済み' ? '✓ ' + r.added.email + ' はもう共有されていました（共有済みとして登録しました）'
+        : '✓ ' + v + ' に共有しました（閲覧のみ）。Googleカレンダーからのお知らせメールを確かめてください';
+    });
+  }
+
+  function calShareRemoveClick(email) {
+    if (!window.confirm(email + ' への、カレンダー「MIC 予定（アプリ）」の共有を外します。\nこのアドレスではカレンダーが見られなくなります。よろしいですか？')) return;
+    calShareOp('calShareRemove', email, function (r) { return '✓ ' + email + ' の共有を外しました' + (r.note && r.note !== '共有を外しました' ? '（' + r.note + '）' : ''); });
+  }
+
+  function calShareOp(action, email, okText) {
+    S.calShare.busy = true;
+    S.calShare.msg = { kind: 'busy', text: action === 'calShareAdd' ? '共有中…' : '解除中…' };
+    renderCalShare();
+    api(action, { email: email }).then(function (r) {
+      S.calShare.shares = r.shares; S.calShare.max = r.max;
+      S.calShare.msg = { kind: 'ok', text: okText(r) };
+    }, function (e) {
+      S.calShare.msg = { kind: 'ng', text: '⚠ できませんでした：' + e.message };
+    }).then(function () { S.calShare.busy = false; renderCalShare(); });
+  }
+
+  function renderCalShare() {
+    var el = byId('calShareBody');
+    if (!el || !S.family) return;
+    var c = S.calShare || { shares: [], max: 2 };
+    var dis = c.busy ? ' disabled' : '';
+    var full = c.shares.length >= (c.max || 2);
+    var h = '<p class="hint">アプリのカレンダー「MIC 予定（アプリ）」を、ご自分のGoogleカレンダーで見られるようにします（<b>閲覧のみ</b>。予定を変えることはできません）。' +
+      'Gmailアドレスを入れて［追加］を押すと、すぐに共有されます。1家族' + (c.max || 2) + '件まで。</p>';
+    if (c.msg) h += '<p class="ev-status ' + c.msg.kind + '" role="status">' + esc(c.msg.text) + '</p>';
+    h += '<ul class="cs-list">' + (c.shares.length ? c.shares.map(function (x) {
+      return '<li><span class="cs-mail">' + esc(x.email) + '</span> <span class="badge ' + (x.state === '共有中' ? 'venue' : 'calsrc') + '">' + esc(x.state) + '</span>' +
+        (x.removable ? ' <button type="button" class="mini ghost" data-cs="remove" data-email="' + esc(x.email) + '"' + dis + '>外す</button>'
+          : ' <small class="muted">前から共有されていたので、ここでは外せません</small>') + '</li>';
+    }).join('') : (c.loaded ? '<li class="muted">まだ登録されていません</li>' : '')) + '</ul>';
+    h += full ? '<p class="hint">登録は' + (c.max || 2) + '件までです。別のアドレスにするときは、先にどれかを外してください。</p>'
+      : '<div class="note-row cs-add"><input id="csEmail" type="email" inputmode="email" autocomplete="email" maxlength="254" placeholder="カレンダー用のGmail（例：name@gmail.com）" aria-label="カレンダー用のGmail"' + dis + '>' +
+        '<button type="button" class="primary" data-cs="add"' + dis + '>追加</button></div>';
+    var keep = byId('csEmail') ? byId('csEmail').value : '';
+    el.innerHTML = h;
+    if (keep && byId('csEmail')) byId('csEmail').value = keep;
+  }
+
+  /** 管理者：家族へのカレンダーの共有の一覧（見るだけ） */
+  function loadCalShareAdmin() {
+    var box = byId('calShareAdmin');
+    if (!box || !S.me.isAdmin) return;
+    api('calShareList').then(function (r) { S.calShareAdmin = { shares: r.shares }; }, function (e) {
+      S.calShareAdmin = { error: /不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message };
+    }).then(renderCalShareAdmin);
+  }
+
+  function renderCalShareAdmin() {
+    var box = byId('calShareAdmin');
+    if (!box || !S.me.isAdmin) return;
+    var a = S.calShareAdmin || {};
+    var h = '<h3>カレンダーの共有（家族）</h3><p class="hint">家族がアプリから「MIC 予定（アプリ）」を閲覧のみで共有したアドレスです（見るだけ。追加・解除のたびに通知メールが届きます）。「共有済み」は前から共有されていたアドレスです。</p>';
+    if (a.error) h += '<p class="ev-status ng">⚠ 読み込めませんでした：' + esc(a.error) + '</p>';
+    else if (!a.shares) h += '<p class="muted">読み込み中…</p>';
+    else h += '<ul class="cs-admin">' + (a.shares.length ? a.shares.map(function (x) {
+      return '<li class="' + (x.state === '解除' ? 'inactive' : '') + '"><b>' + esc(x.familyName) + '</b> <span class="cs-mail">' + esc(x.email) + '</span>' +
+        ' <span class="badge ' + (x.state === '共有中' ? 'venue' : x.state === '解除' ? 'novenue' : 'calsrc') + '">' + esc(x.state) + '</span>' +
+        '<div class="muted">' + esc('経路：' + (x.via || '') + '・追加 ' + (x.addedAt || '').slice(0, 16) + (x.removedAt ? '・解除 ' + x.removedAt.slice(0, 16) : '')) + '</div></li>';
+    }).join('') : '<li class="muted">まだありません</li>') + '</ul>';
+    box.innerHTML = h;
   }
 
   // ================================================================ 宿泊の出欠（v21〜・城さん決定 2026-10-12）
@@ -3196,8 +3308,13 @@
     renderAi();
     api('aiApply', { proposalId: turn.proposal.id }).then(function (r) {
       turn.pstate = 'saved';
-      turn.savedCount = r.saved.length;
-      if (r.kind === 'answerOpen') {
+      turn.savedCount = (r.saved || []).length;
+      if (r.kind === 'calShare') {
+        // カレンダーの共有（v29〜・家族）：結果を出し、共有の欄を描き直す
+        turn.shareRes = r;
+        if (S.calShare) { S.calShare.shares = r.shares || S.calShare.shares; S.calShare.msg = null; }
+        renderCalShare();
+      } else if (r.kind === 'answerOpen') {
         // 参加の受付（v26〜・管理者）：結果を出し、予定の一覧を読み直す
         turn.openRes = r;
         if (S.month) loadEvents(S.month, true);
@@ -3255,7 +3372,30 @@
       '<b>担当の変更案（' + p.changes.length + '件）</b>' + (p.summary ? '<div class="muted">' + esc(p.summary) + '</div>' : '') + body + foot + '</div>';
   }
 
-  var KNOWN_PROPOSALS = ['avail', 'athAvail', 'answer', 'assign', 'answerOpen'];
+  var KNOWN_PROPOSALS = ['avail', 'athAvail', 'answer', 'assign', 'answerOpen', 'calShare'];
+
+  /** カレンダーの共有の変更案（v29〜・家族）：どのアドレスに、閲覧のみで共有する／外す */
+  function calShareProposalHtml(t, i) {
+    var p = t.proposal;
+    var add = p.action !== 'remove';
+    var foot;
+    if (t.pstate === 'pending') {
+      foot = '<div class="ai-prop-acts"><button type="button" class="primary" data-act="apply" data-i="' + i + '">反映</button>' +
+        '<button type="button" class="link-btn" data-act="cancel" data-i="' + i + '">やめる</button></div>' +
+        '<p class="hint">［反映］を押すと、すぐに' + (add ? '共有します（閲覧のみ）' : '共有を外します') + '。</p>';
+    } else if (t.pstate === 'saving') foot = '<p class="ai-prop-msg busy">' + (add ? '共有中…' : '解除中…') + '</p>';
+    else if (t.pstate === 'saved') {
+      var r = t.shareRes || {};
+      foot = '<p class="ai-prop-msg ok">✓ ' + (add ? '共有しました（閲覧のみ）。Googleカレンダーからのお知らせメールを確かめてください' : '共有を外しました') + '</p>' +
+        (r.note && !/^共有を外しました$/.test(r.note) ? '<p class="ai-prop-msg">' + esc(r.note) + '</p>' : '');
+    }
+    else if (t.pstate === 'cancelled') foot = '<p class="ai-prop-msg">やめました（変えていません）</p>';
+    else foot = '<p class="ai-prop-msg">この案は使えません（変えていません）</p>';
+    if (t.perr) foot += '<p class="ai-prop-msg ng">⚠ ' + esc(t.perr) + '</p>';
+    return '<div class="ai-prop' + (t.pstate === 'pending' || t.pstate === 'saving' ? '' : ' done') + '">' +
+      '<b>カレンダーの共有の変更案</b>' +
+      '<div>' + esc(p.calendar || 'MIC 予定（アプリ）') + ' を <b>' + esc(p.email) + '</b> ' + (add ? 'に共有する（閲覧のみ）' : 'から外す') + '</div>' + foot + '</div>';
+  }
 
   /** 変更案の表示。知らない種類・形の違う案は、反映ボタンを出さずに「再読み込みして」とだけ出す（v25.1〜。止まらないように） */
   function proposalHtml(t, i) {
@@ -3296,6 +3436,7 @@
   function proposalHtmlKnown(t, i) {
     var p = t.proposal;
     if (p.kind === 'answerOpen') return answerOpenProposalHtml(t, i);
+    if (p.kind === 'calShare') return calShareProposalHtml(t, i);
     if (p.kind === 'assign') return assignProposalHtml(t, i);
     var answer = p.kind === 'answer';
     var rows = p.days.map(function (d) {
