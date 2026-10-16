@@ -8,7 +8,7 @@
 <meta name="format-detection" content="telephone=no">
 <title>MIC 予定</title>
 <meta name="apple-mobile-web-app-title" content="MIC 予定">
-<link rel="stylesheet" href="style.css?v=20261016a">
+<link rel="stylesheet" href="style.css?v=20261016b">
 </head>
 <body>
 <header class="top">
@@ -42,6 +42,7 @@
   <button type="button" data-tab="all" class="tab">みんなの予定</button>
   <button type="button" data-tab="plan" class="tab" hidden>計画</button>
   <button type="button" data-tab="events" class="tab">予定と担当</button>
+  <button type="button" data-tab="talk" class="tab">トーク</button>
   <button type="button" data-tab="roles" class="tab">役割の希望</button>
   <button type="button" data-tab="staff" class="tab" hidden>スタッフ管理</button>
 </nav>
@@ -203,6 +204,11 @@
     <div id="evList"></div>
   </section>
 
+  <!-- トーク（v30〜）：自分が関わる予定のトークの一覧と、予定ごとのトーク。中身は app.js が描く -->
+  <section id="tab-talk" class="panel" hidden>
+    <div id="talkView"></div>
+  </section>
+
   <!-- スタッフ管理（管理者だけ） -->
   <section id="tab-staff" class="panel" hidden>
     <p class="hint">URLは<strong>本人にだけ</strong>送ってください。再発行・無効にすると、古いURLはすぐ使えなくなります（入力済みの予定は消えません）。</p>
@@ -328,7 +334,7 @@
   </div>
 </section>
 
-<script src="config.js?v=20261016a"></script>
-<script src="app.js?v=20261016a"></script>
+<script src="config.js?v=20261016b"></script>
+<script src="app.js?v=20261016b"></script>
 </body>
 </html>

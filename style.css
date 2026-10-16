@@ -599,3 +599,26 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .cs-add input { flex: 1; min-width: 0; }
 .cs-admin-box { margin: 14px 0; }
 .cs-admin-box h3 { font-size: 15px; margin: 0 0 6px; }
+/* 予定のトーク（v30〜） */
+.talk-badge { display: inline-block; min-width: 1.4em; padding: 0 5px; margin-left: 4px; border-radius: 10px; background: #d93025; color: #fff; font-size: 12px; font-weight: 700; line-height: 1.5; text-align: center; vertical-align: middle; }
+.talk-btn-row { margin: 6px 0; }
+.talk-list { list-style: none; padding: 0; margin: 8px 0; }
+.talk-list li { margin: 0 0 8px; }
+.talk-item { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 48px; font: inherit; color: inherit; }
+.talk-item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.talk-item-sub, .talk-item-last { display: block; color: var(--muted, #666); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+.talk-item-last { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.talk-head { margin: 4px 0 8px; }
+.talk-title { margin: 6px 0 2px; font-size: 17px; }
+.talk-msgs { list-style: none; padding: 0; margin: 8px 0; }
+.talk-msg { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin: 0 0 8px; background: #fff; }
+.talk-msg.mine { background: #eef5ff; border-color: #c7dcff; }
+.talk-msg.deleted { background: #f6f6f6; }
+.talk-meta { font-size: 13px; }
+.talk-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
+.talk-del { font-size: 13px; float: right; }
+.talk-new { text-align: center; color: #d93025; font-size: 12px; font-weight: 700; margin: 4px 0 8px; border-top: 1px solid #f3b4ae; padding-top: 4px; }
+.talk-form { position: sticky; bottom: 0; background: #fff; padding: 8px 0; }
+.talk-form textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.talk-form-row { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+#talkCount.over { color: #d93025; font-weight: 700; }
