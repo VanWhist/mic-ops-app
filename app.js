@@ -322,7 +322,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261017b';
+  var APP_VERSION = '20261017c';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -511,13 +511,11 @@
     nav.querySelectorAll('.tab').forEach(function (b) {
       if (S.me.isAdmin && b.dataset.tab === 'mine') b.hidden = true;
       if (b.dataset.tab === 'staff' || b.dataset.tab === 'plan') b.hidden = !S.me.isAdmin;
-      // 管理者はタブが6つになるので、2つを短くして1行に収める（v14〜）
-      if (S.me.isAdmin && b.dataset.tab === 'roles') b.textContent = '役割';
-      if (S.me.isAdmin && b.dataset.tab === 'staff') b.textContent = '管理';
       if (b.dataset.tab === 'roles' && S.family) b.hidden = true;
       b.addEventListener('click', function () {
         if (S.family && S.tab === 'events' && b.dataset.tab !== 'events' && hasUnsavedAnswers() && !window.confirm(UNSAVED_MSG)) return;
         S.tab = b.dataset.tab;
+        S.calBack = null;   // タブを選び直したら「カレンダーに戻る」は消す（v33〜）
         renderAll();
         if (S.tab === 'events') { if (S.family) S.ansMsg = null; loadEvents(S.month, !!S.family); }   // 家族は開くたびに最新の受付・回答を読む
         if (S.tab === 'staff') { loadStaffAdmin(); loadFamilies(); loadAiSuggestions(); loadLodgings(); }
@@ -526,6 +524,7 @@
         if (S.tab === 'cal') calOpen();   // カレンダー（v32〜）
       });
     });
+    byId('calBackBtn').addEventListener('click', calBackGo);
     document.querySelectorAll('.month-nav').forEach(function (nav) {
       nav.querySelector('.prev').addEventListener('click', function () { moveMonth(-1); });
       nav.querySelector('.next').addEventListener('click', function () { moveMonth(1); });
@@ -2814,6 +2813,7 @@
 
   /** 帯・予定をタップ：その予定のカードへ（スタッフ・管理者＝予定と担当、家族＝練習会など） */
   function calGoCard(key, month) {
+    var back = { y: window.scrollY };   // 戻るときに、同じ月・表示・位置のカレンダーへ（v33〜）
     if (S.family) {
       var up = S.upcoming && S.upcoming.data && S.upcoming.data.events;
       var ev0 = null;
@@ -2834,7 +2834,27 @@
       renderAll();
       loadEvents(month);
     }
+    S.calBack = back;
+    renderCalBack();
     calFocusCard(key, 0);
+  }
+
+  /** 「カレンダーに戻る」（v33〜）：カレンダーから予定のカードへ飛んだあと、左下に出す。1タップで元のカレンダーへ */
+  function renderCalBack() {
+    var b = byId('calBackBtn');
+    var on = !!(S.calBack && S.tab !== 'cal');
+    if (b) b.hidden = !on;
+    document.body.classList.toggle('has-calback', on);
+  }
+  function calBackGo() {
+    var back = S.calBack;
+    if (!back) return;
+    if (S.family && hasUnsavedAnswers() && !window.confirm(UNSAVED_MSG)) return;
+    S.calBack = null;
+    S.tab = 'cal';
+    renderAll();
+    calOpen();
+    window.scrollTo(0, back.y);
   }
 
   /** カードが描かれるのを待って、そこまでスクロールして光らせる */
@@ -4081,6 +4101,7 @@
     renderRolesTable();
     renderTalk();
     renderCalTab();
+    renderCalBack();
     renderSaveState();
     renderAsOf();
   }
