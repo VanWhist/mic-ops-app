@@ -330,7 +330,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261017d';
+  var APP_VERSION = '20261017e';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -534,7 +534,7 @@
         if (S.tab === 'events') { if (S.family) S.ansMsg = null; loadEvents(S.month, !!S.family); }   // 家族は開くたびに最新の受付・回答を読む
         if (S.tab === 'staff') { loadStaffAdmin(); loadFamilies(); loadAiSuggestions(); loadLodgings(); }
         if (S.tab === 'plan') renderPlan();
-        if (S.tab === 'talk') { S.talkOpen = null; loadTalkSummary(); renderTalk(); }   // トーク（v30〜）：開くたびに一覧を読み直す
+        if (S.tab === 'talk') { S.talkOpen = null; S.talkOrder = null; S.talkMsg = null; loadTalkSummary(); renderTalk(); }   // トーク（v30〜）：開くたびに一覧を読み直す
         if (S.tab === 'cal') calOpen();   // カレンダー（v32〜）
       });
     });
@@ -2930,7 +2930,10 @@
       var b = e.target.closest('[data-tk]');
       if (!b || b.disabled) return;
       var act = b.dataset.tk;
-      if (act === 'back') { S.talkOpen = null; loadTalkSummary(); renderTalk(); window.scrollTo(0, 0); }
+      if (act === 'back') { S.talkOpen = null; S.talkOrder = null; S.talkMsg = null; loadTalkSummary(); renderTalk(); window.scrollTo(0, 0); }
+      else if (act === 'open') openTalk(b.dataset.key, b.dataset.month);
+      else if (act === 'grp') { S.talkGroup = b.dataset.g; S.talkMsg = null; renderTalk(); }
+      else if (act === 'pin') talkPin(b.dataset.key, b.dataset.month, b.getAttribute('aria-pressed') !== 'true');
       else if (act === 'send') talkSend();
       else if (act === 'del') {
         if (!window.confirm('この書き込みを削除します。よろしいですか？')) return;
@@ -2946,8 +2949,58 @@
     });
     setInterval(function () {
       if (document.visibilityState !== 'visible' || S.tab !== 'talk' || S.talkBusy) return;
-      if (S.talkOpen) talkReload(true); else loadTalkSummary();
+      if (S.talkOpen) talkReload(true); else loadTalkSummary();   // 一覧の並びは変えない（数字だけ）。並べ直すのは開き直したとき
     }, TALK_POLL_MS);
+    // アプリに戻ってきたら未読を読み直す（v35〜）。一覧を見ていたら並べ直す
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden || !S.uiReady || S.dead || S.talkBusy) return;
+      if (S.tab === 'talk' && !S.talkOpen) S.talkOrder = null;
+      if (S.tab === 'talk' && S.talkOpen) talkReload(true); else loadTalkSummary();
+    });
+  }
+
+  /** ピン止め・外す（v35〜）。結果の一覧で描き直し、並べ直す */
+  function talkPin(key, month, on) {
+    if (S.talkBusy) return;
+    S.talkBusy = true;
+    S.talkMsg = { kind: 'busy', text: on ? 'ピン止めしています…' : 'ピンを外しています…' };
+    renderTalk();
+    api('talkPin', { month: month, eventKey: key, on: on }).then(function (r) {
+      S.talkSum = r; S.talkSumErr = null; S.talkOrder = null;
+      S.talkMsg = { kind: 'ok', text: on ? 'ピン止めしました（上に出ます）' : 'ピンを外しました' };
+      saveCache();
+    }, function (e) {
+      S.talkMsg = { kind: 'ng', text: '⚠ ' + (/不明な操作|使えません/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message) };
+    }).then(function () { S.talkBusy = false; renderTalkBadges(); renderTalk(); });
+  }
+
+  /**
+   * 一覧の並び（v35〜）：ピン → 未読あり → 既読 → 書き込みなし。前の3つは最後の書き込みが新しい順、書き込みなしは日付順。
+   * 30秒ごとの読み直しでは並びを変えない（読んでいる途中に行が動かないように）。開き直したとき・ピンを付け外ししたときに並べ直す
+   */
+  function talkRank(x) { return x.pinned ? 0 : x.unread ? 1 : x.count ? 2 : 3; }
+  function talkCompare(a, b) {
+    var ra = talkRank(a), rb = talkRank(b);
+    if (ra !== rb) return ra - rb;
+    if (ra < 3 && a.lastAt !== b.lastAt) return a.lastAt < b.lastAt ? 1 : -1;
+    return a.start < b.start ? -1 : a.start > b.start ? 1 : 0;
+  }
+  function talkSorted(items) {
+    var all = items.slice().sort(talkCompare);
+    if (!S.talkOrder) { S.talkOrder = all.map(function (x) { return x.talkKey; }); return all; }
+    var pos = {};
+    S.talkOrder.forEach(function (k, i) { pos[k] = i; });
+    var known = all.filter(function (x) { return pos.hasOwnProperty(x.talkKey); }).sort(function (a, b) { return pos[a.talkKey] - pos[b.talkKey]; });
+    return known.concat(all.filter(function (x) { return !pos.hasOwnProperty(x.talkKey); }));   // 新しく出てきたものは下に足す
+  }
+
+  function talkItemHtml(x) {
+    var pinBtn = x.ended ? '' : '<button type="button" class="talk-pin' + (x.pinned ? ' on' : '') + '" data-tk="pin" data-key="' + esc(x.eventKey) + '" data-month="' + esc(x.month) + '"' +
+      ' aria-pressed="' + (x.pinned ? 'true' : 'false') + '" aria-label="' + (x.pinned ? 'ピンを外す' : 'ピン止めする') + '" title="' + (x.pinned ? 'ピンを外す' : 'ピン止め') + '"' + (S.talkBusy ? ' disabled' : '') + '>📌</button>';
+    return '<li class="talk-row' + (x.pinned ? ' pinned' : '') + '"><button type="button" class="talk-item" data-tk="open" data-key="' + esc(x.eventKey) + '" data-month="' + esc(x.month) + '">' +
+      '<span class="talk-item-head"><b>' + esc(x.title) + '</b>' + (x.unread ? '<span class="talk-badge">' + x.unread + '</span>' : '') + '</span>' +
+      '<span class="talk-item-sub">' + esc(talkRange(x)) + (x.ended ? '（終わった予定）' : '') + '・' + (x.count ? x.count + '件・' + esc(talkWhen(x.lastAt)) + ' 更新' : 'まだ書き込みなし') + '</span>' +
+      (x.unread ? '<span class="talk-item-new">新しい書き込みがあります</span>' : '') + '</button>' + pinBtn + '</li>';
   }
 
   function loadTalkSummary() {
@@ -2962,10 +3015,10 @@
   /** タブ（トーク（n））と予定カードのバッジを描き直す */
   function renderTalkBadges() {
     var b = document.querySelector('.tab[data-tab="talk"]');
-    var n = S.talkSum ? S.talkSum.unreadTotal || 0 : 0;
+    var n = S.talkSum ? (S.talkSum.unreadTalks != null ? S.talkSum.unreadTalks : S.talkSum.unreadTotal) || 0 : 0;   // v35〜 未読のあるトークの数
     if (b) b.innerHTML = 'トーク' + (n ? '<span class="talk-badge">' + n + '</span>' : '');
     tabsEdges();
-    document.querySelectorAll('[data-talk-open]').forEach(function (x) {
+    document.querySelectorAll('.talk-btn[data-talk-open]').forEach(function (x) {
       var ev = talkEventByKey(x.dataset.talkOpen);
       var c = ev && S.talkSum && S.talkSum.unread ? S.talkSum.unread[ev.talkKey] || 0 : 0;
       x.innerHTML = '💬 トーク' + (c ? ' <span class="talk-badge">' + c + '</span>' : '');
@@ -3003,6 +3056,13 @@
       if (S.talkSum && S.talkSum.unread && S.talkSum.unread[r.talkKey]) {   // 開いたので既読
         S.talkSum.unreadTotal = Math.max(0, (S.talkSum.unreadTotal || 0) - S.talkSum.unread[r.talkKey]);
         delete S.talkSum.unread[r.talkKey];
+        (S.talkSum.items || []).forEach(function (x) {   // v35〜 一覧の行・タブの数字（未読のあるトークの数）も
+          if (x.talkKey !== r.talkKey || !x.unread) return;
+          x.unread = 0;
+          if (S.talkSum.unreadTalks) S.talkSum.unreadTalks--;
+          var gk = x.group === 'other' ? 'unreadOther' : 'unreadRel';
+          if (S.talkSum[gk]) S.talkSum[gk]--;
+        });
         renderTalkBadges();
       }
       if (!quiet || grew) renderTalk(!quiet);
@@ -3053,17 +3113,22 @@
     var msg = S.talkMsg ? '<p class="ev-status ' + S.talkMsg.kind + '" role="status">' + esc(S.talkMsg.text) + '</p>' : '';
     if (!o) {
       var sum = S.talkSum;
-      var h = '<p class="hint">' + (S.me.isAdmin ? '書き込みのある予定のトークです。' : S.family ? '参加する練習会・合宿・大会のトークです。' : '○を付けた日か担当の予定のトークです。') +
-        'ほかの予定のトークは、予定カードの［💬 トーク］から開けます。</p>';
+      var g = S.talkGroup === 'other' ? 'other' : 'rel';
+      var items = sum && sum.items ? sum.items : [];
+      var cnt = function (gr) { return items.filter(function (x) { return (x.group || 'rel') === gr && x.unread; }).length; };
+      var h = '<div class="talk-groups" role="tablist">' + [['rel', '関係する'], ['other', 'そのほか']].map(function (t) {
+        var c = cnt(t[0]);
+        return '<button type="button" role="tab" class="talk-grp' + (g === t[0] ? ' on' : '') + '" aria-selected="' + (g === t[0]) + '" data-tk="grp" data-g="' + t[0] + '">' + t[1] +
+          (c ? '<span class="talk-badge">' + c + '</span>' : '') + '</button>';
+      }).join('') + '</div>' + msg;
+      h += '<p class="hint">' + (g === 'rel'
+        ? (S.me.isAdmin ? '書き込みのある予定' : S.family ? '参加する予定・回答を待っている予定' : '担当か○を付けた日の予定') + 'と、書き込んだ・ピン止めしたトークです。［📌］で上に固定できます（' + ((sum && sum.pinMax) || 5) + '件まで）。'
+        : 'これからの練習会・合宿・大会のうち、「関係する」にないトークです。どれも読んで書けます。') + '</p>';
+      var list = items.filter(function (x) { return (x.group || 'rel') === g; });
       if (S.talkSumErr) h += '<p class="ev-status ng">⚠ 読み込めませんでした：' + esc(S.talkSumErr) + '</p>';
-      else if (!sum) h += '<p class="muted">読み込み中…</p>';
-      else if (!sum.items.length) h += '<p class="muted">いまはトークがありません。</p>';
-      else h += '<ul class="talk-list">' + sum.items.map(function (x) {
-        return '<li><button type="button" class="talk-item" data-talk-open="' + esc(x.eventKey) + '" data-month="' + esc(x.month) + '">' +
-          '<span class="talk-item-head"><b>' + esc(x.title) + '</b>' + (x.unread ? '<span class="talk-badge">' + x.unread + '</span>' : '') + '</span>' +
-          '<span class="talk-item-sub">' + esc(talkRange(x)) + (x.count ? '・' + x.count + '件' : '・まだ書き込みなし') + '</span>' +
-          (x.lastText ? '<span class="talk-item-last">' + esc(x.lastName + '：' + x.lastText) + '</span>' : '') + '</button></li>';
-      }).join('') + '</ul>';
+      if (!sum) h += S.talkSumErr ? '' : '<p class="muted">読み込み中…</p>';
+      else if (!list.length) h += '<p class="muted">' + (g === 'rel' ? '関係するトークはいまありません。「そのほか」から探せます。' : 'ほかのトークはありません。') + '</p>';
+      else h += '<ul class="talk-list">' + talkSorted(items).filter(function (x) { return (x.group || 'rel') === g; }).map(talkItemHtml).join('') + '</ul>';
       box.innerHTML = h;
       return;
     }
