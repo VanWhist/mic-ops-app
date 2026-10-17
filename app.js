@@ -353,7 +353,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261017f';
+  var APP_VERSION = '20261017g';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -2958,12 +2958,26 @@
       else if (act === 'grp') { S.talkGroup = b.dataset.g; S.talkMsg = null; renderTalk(); }
       else if (act === 'pin') talkPin(b.dataset.key, b.dataset.month, b.getAttribute('aria-pressed') !== 'true');
       else if (act === 'send') talkSend();
+      else if (act === 'sum') talkSummarize();
+      else if (act === 'sumPost') {
+        var o2 = S.talkOpen, t2 = String(o2 && o2.sumDraft || '').trim();
+        if (!t2) { S.talkMsg = { kind: 'ng', text: '⚠ まとめが空です' }; renderTalk(); return; }
+        if (Array.from(t2).length > TALK_SUM_POST_MAX) { S.talkMsg = { kind: 'ng', text: '⚠ ' + TALK_SUM_POST_MAX + '字までです' }; renderTalk(); return; }
+        talkOp('talkPost', { text: t2, kind: 'haiku' }, 'まとめをトークに載せました', function () { o2.sum = null; o2.sumDraft = ''; });
+      }
+      else if (act === 'sumClose') { S.talkOpen.sum = null; S.talkOpen.sumDraft = ''; S.talkMsg = null; renderTalk(); }
       else if (act === 'del') {
         if (!window.confirm('この書き込みを削除します。よろしいですか？')) return;
         talkOp('talkDelete', { id: b.dataset.id }, '削除しました');
       }
     });
     byId('talkView').addEventListener('input', function (e) {
+      if (e.target.id === 'talkSumText' && S.talkOpen) {   // Haiku君のまとめを手で直す（v37〜）
+        S.talkOpen.sumDraft = e.target.value;
+        var sc = byId('talkSumCount'), sn = Array.from(e.target.value.trim()).length;
+        if (sc) { sc.textContent = sn + ' / ' + TALK_SUM_POST_MAX; sc.classList.toggle('over', sn > TALK_SUM_POST_MAX); }
+        return;
+      }
       if (e.target.id !== 'talkText') return;
       S.talkDraft = e.target.value;
       var n = Array.from(S.talkDraft.trim()).length;
@@ -3103,6 +3117,57 @@
     talkOp('talkPost', { text: t }, '送りました', function () { S.talkDraft = ''; });
   }
 
+  // ================================================================ トークの Haiku君のまとめ（v37〜・城さん確定 2026-10-17）
+  // ★ ［Haiku君にまとめてもらう］→ まず自分の画面にだけ出す（手で直せる）→［トークに載せる］で書き込み、［閉じる］で消す
+  // ★ 書き込み3件未満は押せない。前回のまとめから新しい書き込みがなければ、サーバーが前回の結果を返す（回数を使わない）
+  var TALK_SUM_MIN = 3, TALK_SUM_POST_MAX = 1500;
+
+  function talkSumCount(d) {
+    if (typeof d.sumCount === 'number') return d.sumCount;
+    return d.messages.filter(function (m) { return !m.deleted && !m.haiku; }).length;
+  }
+
+  function talkSumHtml(o, d) {
+    var dis = S.talkBusy ? ' disabled' : '';
+    if (!o.sum) {
+      var n = talkSumCount(d), min = d.sumMin || TALK_SUM_MIN;
+      return '<div class="talk-sum"><button type="button" class="talk-sum-btn" data-tk="sum"' + (n < min || S.talkBusy ? ' disabled' : '') + '>🤖 Haiku君にまとめてもらう</button>' +
+        '<span class="hint">' + (n < min ? '書き込みが' + min + '件になると使えます（いま' + n + '件）' : '決まったこと・まだのこと・誰が何をするかをまとめます') + '</span></div>';
+    }
+    var draft = o.sumDraft == null ? o.sum.summary : o.sumDraft;
+    var len = Array.from(String(draft).trim()).length;
+    return '<section class="talk-sum-box" aria-label="Haiku君のまとめ"><h4>🤖 Haiku君のまとめ <span class="muted">（まだあなたの画面だけ）</span></h4>' +
+      (o.sum.cached ? '<p class="hint">前回のまとめから新しい書き込みがないので、前回のまとめを出しています（Haiku君の回数は使っていません）。</p>' : '') +
+      (o.sum.cut ? '<p class="hint">書き込みが多いので、新しい方の書き込みだけでまとめました。</p>' : '') +
+      '<textarea id="talkSumText" rows="10" aria-label="まとめ（直せます）"' + dis + '>' + esc(draft) + '</textarea>' +
+      '<div class="talk-form-row"><span id="talkSumCount" class="muted' + (len > TALK_SUM_POST_MAX ? ' over' : '') + '">' + len + ' / ' + TALK_SUM_POST_MAX + '</span>' +
+      '<span class="talk-sum-btns"><button type="button" class="ghost2" data-tk="sumClose"' + dis + '>閉じる</button>' +
+      '<button type="button" class="primary" data-tk="sumPost"' + dis + '>トークに載せる</button></span></div>' +
+      '<p class="hint">Haiku君は間違えることがあります。載せる前に読んで、違うところは直してください。載せるとみんなに見えます。</p></section>';
+  }
+
+  function talkSummarize() {
+    var o = S.talkOpen;
+    if (!o || S.talkBusy) return;
+    S.talkBusy = true;
+    S.talkMsg = { kind: 'busy', text: 'Haiku君がまとめています…（30秒ほどかかることがあります）' };
+    renderTalk();
+    api('talkSummarize', { month: o.month, eventKey: o.key }, 60000).then(function (r) {
+      if (S.talkOpen !== o) return;
+      o.sum = r; o.sumDraft = r.summary;
+      S.talkMsg = null;
+    }, function (e) {
+      if (S.talkOpen !== o) return;
+      S.talkMsg = { kind: 'ng', text: '⚠ まとめられませんでした：' + (/不明な操作|使えません/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message) };
+    }).then(function () {
+      S.talkBusy = false;
+      if (S.talkOpen !== o) return;
+      renderTalk();
+      var bx = document.querySelector('.talk-sum-box');
+      if (bx) bx.scrollIntoView({ block: 'start' });
+    });
+  }
+
   function talkOp(action, body, okText, done) {
     var o = S.talkOpen;
     if (!o) return;
@@ -3166,7 +3231,7 @@
       list = d.messages.length ? '<ul class="talk-msgs">' + d.messages.map(function (m, i) {
         var line = i === firstFresh ? '<li class="talk-new">ここから新着</li>' : '';
         if (m.deleted) return line + '<li class="talk-msg deleted"><span class="muted">（削除されました）</span></li>';
-        return line + '<li class="talk-msg' + (m.mine ? ' mine' : '') + '"><div class="talk-meta"><b>' + esc(m.name) + '</b> <span class="muted">' + esc(talkWhen(m.at)) + '</span>' +
+        return line + '<li class="talk-msg' + (m.mine ? ' mine' : '') + (m.haiku ? ' haiku' : '') + '"><div class="talk-meta"><b>' + (m.haiku ? '🤖 ' : '') + esc(m.name) + '</b> <span class="muted">' + esc(talkWhen(m.at)) + '</span>' +
           (m.canDelete ? ' <button type="button" class="link-btn talk-del" data-tk="del" data-id="' + esc(m.id) + '"' + dis + '>削除</button>' : '') + '</div>' +
           '<div class="talk-text">' + esc(m.text) + '</div></li>';
       }).join('') + '</ul>' : '<p class="muted">まだ書き込みはありません。交通・宿・持ち物など、この予定のことを書いてください。</p>';
@@ -3177,9 +3242,9 @@
       '<div class="talk-form-row"><span id="talkCount" class="muted' + (n > 500 ? ' over' : '') + '">' + n + ' / 500</span>' +
       '<button type="button" class="primary" data-tk="send"' + dis + '>送信</button></div>' +
       '<p class="hint">管理者・スタッフ・家族のみんなが見られます。30秒ごとに新しい書き込みを読み込みます。</p></div>';
-    var focused = document.activeElement && document.activeElement.id === 'talkText';
-    box.innerHTML = head + msg + list + form;
-    if (focused && byId('talkText')) { var ta = byId('talkText'); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    var focusId = document.activeElement && /^(talkText|talkSumText)$/.test(document.activeElement.id) ? document.activeElement.id : '';
+    box.innerHTML = head + msg + list + (d ? talkSumHtml(o, d) : '') + form;
+    if (focusId && byId(focusId)) { var ta = byId(focusId); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
     if (scrollEnd) { var f = box.querySelector('.talk-form'); if (f) f.scrollIntoView({ block: 'end' }); }
   }
 

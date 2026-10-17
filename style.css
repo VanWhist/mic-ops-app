@@ -712,3 +712,16 @@ body.has-calback main { padding-bottom: calc(100px + env(safe-area-inset-bottom)
 .talk-pin.on { filter: none; opacity: 1; border-color: var(--accent); background: #f3f7ff; }
 .talk-pin:disabled { cursor: default; }
 .talk-item-new { display: block; color: var(--accent); font-size: 13px; font-weight: 700; margin-top: 2px; }
+
+/* トークの Haiku君のまとめ（v37〜） */
+.talk-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 4px 0 10px; }
+.talk-sum-btn { min-height: 44px; padding: 6px 14px; border: 1px solid var(--accent); border-radius: 10px; background: #fff; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
+.talk-sum-btn:disabled { opacity: .45; cursor: default; }
+.talk-sum .hint { margin: 0; }
+.talk-sum-box { border: 2px solid var(--accent); border-radius: 12px; background: #f6f9ff; padding: 10px 12px; margin: 4px 0 12px; }
+.talk-sum-box h4 { margin: 0 0 6px; font-size: 15px; }
+.talk-sum-box textarea { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 16px; line-height: 1.5; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.talk-sum-btns { display: inline-flex; gap: 8px; }
+.talk-sum-btns button { min-height: 44px; }
+.talk-msg.haiku { background: #f6f9ff; border-color: #b9cdf5; }
+.talk-sum-btns .ghost2 { background: #fff; color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; padding: 6px 14px; font: inherit; font-weight: 700; }
