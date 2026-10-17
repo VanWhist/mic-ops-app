@@ -604,7 +604,7 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .talk-btn-row { margin: 6px 0; }
 .talk-list { list-style: none; padding: 0; margin: 8px 0; }
 .talk-list li { margin: 0 0 8px; }
-.talk-item { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 48px; font: inherit; color: inherit; }
+.talk-item { display: block; flex: 1 1 auto; min-width: 0; width: 100%; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 48px; font: inherit; color: inherit; }
 .talk-item-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .talk-item-sub, .talk-item-last { display: block; color: var(--muted, #666); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
 .talk-item-last { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -700,3 +700,15 @@ article.ev.cal-flash { box-shadow: 0 0 0 3px #ffb300; transition: box-shadow .3s
 .cal-back:active { transform: scale(.97); }
 .cal-back[hidden] { display: none; }
 body.has-calback main { padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
+
+/* トークの一覧（v35〜）：関係する／そのほか・ピン止め */
+.talk-groups { display: flex; gap: 0; margin: 4px 0 8px; border: 1px solid var(--accent); border-radius: 10px; overflow: hidden; }
+.talk-grp { flex: 1 1 0; min-height: 44px; border: 0; background: #fff; color: var(--accent); font: inherit; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; }
+.talk-grp + .talk-grp { border-left: 1px solid var(--accent); }
+.talk-grp.on { background: var(--accent); color: #fff; }
+.talk-row { display: flex; align-items: stretch; gap: 6px; }
+.talk-row.pinned .talk-item { border-color: var(--accent); background: #f3f7ff; }
+.talk-pin { flex: 0 0 44px; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; background: #fff; font-size: 18px; line-height: 1; cursor: pointer; filter: grayscale(1); opacity: .45; }
+.talk-pin.on { filter: none; opacity: 1; border-color: var(--accent); background: #f3f7ff; }
+.talk-pin:disabled { cursor: default; }
+.talk-item-new { display: block; color: var(--accent); font-size: 13px; font-weight: 700; margin-top: 2px; }
