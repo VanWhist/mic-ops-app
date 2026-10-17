@@ -8,7 +8,7 @@
 <meta name="format-detection" content="telephone=no">
 <title>MIC 予定</title>
 <meta name="apple-mobile-web-app-title" content="MIC 予定">
-<link rel="stylesheet" href="style.css?v=20261016c">
+<link rel="stylesheet" href="style.css?v=20261017a">
 </head>
 <body>
 <header class="top">
@@ -40,6 +40,7 @@
 <nav id="tabs" class="tabs" hidden>
   <button type="button" data-tab="mine" class="tab">自分の予定</button>
   <button type="button" data-tab="all" class="tab">みんなの予定</button>
+  <button type="button" data-tab="cal" class="tab">カレンダー</button>
   <button type="button" data-tab="plan" class="tab" hidden>計画</button>
   <button type="button" data-tab="events" class="tab">予定と担当</button>
   <button type="button" data-tab="talk" class="tab">トーク</button>
@@ -204,6 +205,25 @@
     <div id="evList"></div>
   </section>
 
+  <!-- カレンダー（v32〜）：練習会・合宿・大会を月の表と一覧で。中身は app.js が描く -->
+  <section id="tab-cal" class="panel" hidden>
+    <div class="cal-top">
+      <div class="cal-view" role="group" aria-label="表示">
+        <button type="button" class="cv-btn" data-cv="month">月</button><button type="button" class="cv-btn" data-cv="list">一覧</button>
+      </div>
+      <div class="cal-nav">
+        <button type="button" class="cal-prev" aria-label="前の月">‹</button>
+        <span class="cal-label"></span>
+        <button type="button" class="cal-next" aria-label="次の月">›</button>
+        <button type="button" class="cal-today">今日</button>
+      </div>
+    </div>
+    <div id="calLegend" class="cal-legend"></div>
+    <p id="calStatusMsg" class="ev-status" role="status" aria-live="polite"></p>
+    <div id="calBody"></div>
+    <div id="calDayBox"></div>
+  </section>
+
   <!-- トーク（v30〜）：自分が関わる予定のトークの一覧と、予定ごとのトーク。中身は app.js が描く -->
   <section id="tab-talk" class="panel" hidden>
     <div id="talkView"></div>
@@ -334,7 +354,7 @@
   </div>
 </section>
 
-<script src="config.js?v=20261016c"></script>
-<script src="app.js?v=20261016c"></script>
+<script src="config.js?v=20261017a"></script>
+<script src="app.js?v=20261017a"></script>
 </body>
 </html>
