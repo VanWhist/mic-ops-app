@@ -322,7 +322,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261017a';
+  var APP_VERSION = '20261017b';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -434,7 +434,7 @@
 
   function setupFamilyUI() {
     // タブ：入力・みんなの予定・練習会など（役割・スタッフ管理は出さない。AIは右下のボタン・v18〜）
-    var label = { mine: '予定を入力', all: 'みんな', events: '練習会など' };   // 「みんなの予定」は v32〜 タブが増えたので「みんな」
+    var label = { mine: '予定を入力', all: 'みんなの予定', events: '練習会など' };
     document.querySelectorAll('.tab').forEach(function (b) {
       if (label[b.dataset.tab]) b.textContent = label[b.dataset.tab];
     });
@@ -506,15 +506,14 @@
   function setupTabs() {
     var nav = byId('tabs');
     nav.hidden = false;
+    nav.addEventListener('scroll', tabsEdges, { passive: true });
+    window.addEventListener('resize', tabsEdges);
     nav.querySelectorAll('.tab').forEach(function (b) {
       if (S.me.isAdmin && b.dataset.tab === 'mine') b.hidden = true;
       if (b.dataset.tab === 'staff' || b.dataset.tab === 'plan') b.hidden = !S.me.isAdmin;
       // 管理者はタブが6つになるので、2つを短くして1行に収める（v14〜）
       if (S.me.isAdmin && b.dataset.tab === 'roles') b.textContent = '役割';
       if (S.me.isAdmin && b.dataset.tab === 'staff') b.textContent = '管理';
-      // カレンダー（v32〜）でタブが増えたので、長い2つを短くして1行に収める
-      if (b.dataset.tab === 'all') b.textContent = 'みんな';
-      if (b.dataset.tab === 'roles') b.textContent = '役割';
       if (b.dataset.tab === 'roles' && S.family) b.hidden = true;
       b.addEventListener('click', function () {
         if (S.family && S.tab === 'events' && b.dataset.tab !== 'events' && hasUnsavedAnswers() && !window.confirm(UNSAVED_MSG)) return;
@@ -531,6 +530,24 @@
       nav.querySelector('.prev').addEventListener('click', function () { moveMonth(-1); });
       nav.querySelector('.next').addEventListener('click', function () { moveMonth(1); });
     });
+  }
+
+  /** タブの横スクロール（v32〜）：選んだタブが見えるようにし、まだタブがある側の端をぼかす */
+  function tabsScrollToActive() {
+    var nav = byId('tabs'), on = nav && nav.querySelector('.tab.on');
+    if (!nav || nav.hidden) return;
+    if (on) {
+      var l = on.offsetLeft - nav.offsetLeft, r = l + on.offsetWidth;
+      if (l < nav.scrollLeft + 16) nav.scrollLeft = Math.max(0, l - 16);
+      else if (r > nav.scrollLeft + nav.clientWidth - 16) nav.scrollLeft = r - nav.clientWidth + 16;
+    }
+    tabsEdges();
+  }
+  function tabsEdges() {
+    var nav = byId('tabs');
+    if (!nav) return;
+    nav.classList.toggle('more-l', nav.scrollLeft > 2);
+    nav.classList.toggle('more-r', nav.scrollLeft + nav.clientWidth < nav.scrollWidth - 2);
   }
 
   function moveMonth(d) {
@@ -1289,6 +1306,7 @@
     var n = d ? askList(d.events).length : 0;
     var b = document.querySelector('.tab[data-tab="events"]');
     if (b) b.textContent = '練習会など' + (n ? '（' + n + '）' : '');
+    tabsEdges();
   }
 
   // ---- 参加の回答（v15〜日ごと＋時間指定）
@@ -2900,6 +2918,7 @@
     var b = document.querySelector('.tab[data-tab="talk"]');
     var n = S.talkSum ? S.talkSum.unreadTotal || 0 : 0;
     if (b) b.innerHTML = 'トーク' + (n ? '<span class="talk-badge">' + n + '</span>' : '');
+    tabsEdges();
     document.querySelectorAll('[data-talk-open]').forEach(function (x) {
       var ev = talkEventByKey(x.dataset.talkOpen);
       var c = ev && S.talkSum && S.talkSum.unread ? S.talkSum.unread[ev.talkKey] || 0 : 0;
@@ -4052,6 +4071,7 @@
     applyAppName();
     if (!S.me || !S.uiReady || S.dead) return;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === S.tab); });
+    tabsScrollToActive();   // タブが横にはみ出すとき、選んだタブを見える位置に（v32〜）
     ['mine', 'all', 'cal', 'plan', 'events', 'talk', 'roles', 'staff'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
     renderMonthLabels();
     renderMine();

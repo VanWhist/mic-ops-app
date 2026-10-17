@@ -682,5 +682,11 @@ article.ev.cal-flash { box-shadow: 0 0 0 3px #ffb300; transition: box-shadow .3s
 .cm.s-t { color: var(--t); background: var(--t-bg); }
 .cm.s-x { color: var(--x); background: var(--x-bg); }
 /* タブが7つになっても1行に収める（v32〜）：文字の長さに合わせて幅を分ける */
-.tab { flex: 1 1 auto; padding-left: 1px; padding-right: 1px; letter-spacing: -0.08em; }
-.tabs { gap: 3px; }
+/* タブは横にスライドできる（v32〜 城さん 10/17）。入りきるときは幅いっぱいに広がり、入りきらないときは横にスクロール */
+.tabs { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; overscroll-behavior-x: contain; position: relative; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: 1 0 auto; padding-left: 10px; padding-right: 10px; letter-spacing: -0.04em; }
+/* 右（左）にまだタブがあるときは端をぼかして知らせる */
+.tabs.more-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.tabs.more-l { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); }
+.tabs.more-l.more-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
