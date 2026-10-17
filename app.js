@@ -83,6 +83,14 @@
       : { me: S.me, staff: S.staff, roles: S.roles, availability: S.avail, period: S.period, venues: S.venues, athletes: S.athletes, athleteAvailability: S.aAvail };
     var store = { savedAt: Date.now(), bootAt: S.bootAt, boot: boot, events: events };
     if (S.inEv) store.inEv = S.inEv;   // 「自分の予定」に出す合宿・大会（v13〜）
+    // v34〜：家族の「練習会など」・家族のカレンダー・トークの未読も残し、開いた瞬間に前回の分を出す（裏で取り直す）
+    if (S.family && S.upcoming && S.upcoming.data && S.upcoming.status === 'ok') store.upcoming = S.upcoming.data;
+    if (S.family && S.calData) {
+      var cal = {};
+      Object.keys(S.calData).forEach(function (m) { var c = S.calData[m]; if (c && c.data && c.at) cal[m] = { data: c.data, at: c.at }; });
+      store.cal = cal;
+    }
+    if (S.talkSum) store.talkSum = S.talkSum;
     try { localStorage.setItem(cacheKey, JSON.stringify(store)); }
     catch (e) { /* 容量不足などでも、キャッシュなしで動く */ }
   }
@@ -322,7 +330,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261017c';
+  var APP_VERSION = '20261017d';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -356,6 +364,12 @@
         S.bootAt = c.bootAt; S.fromCache = true;
         Object.keys(c.events || {}).forEach(function (m) { S.events[m] = { status: 'cached', data: c.events[m].data, at: c.events[m].at }; });
         if (c.inEv && typeof c.inEv === 'object') S.inEv = c.inEv;
+        if (S.family && c.upcoming && Array.isArray(c.upcoming.events)) S.upcoming = { status: 'cached', data: c.upcoming };
+        if (S.family && c.cal && typeof c.cal === 'object') {
+          S.calData = {};
+          Object.keys(c.cal).forEach(function (m) { S.calData[m] = { status: 'cached', data: c.cal[m].data, at: c.cal[m].at }; });
+        }
+        if (c.talkSum && typeof c.talkSum === 'object') S.talkSum = c.talkSum;
         initUI();
         window.__micopsCacheShownAt = performance.now();   // 計測用
       }
@@ -1279,9 +1293,15 @@
     if (cur && (cur.status === 'loading' || (cur.status === 'ok' && !force))) { renderUpcoming(); return; }
     S.upcoming = { status: 'loading', data: cur && cur.data };
     renderUpcoming();
-    api('upcoming').then(function (r) { S.upcoming = { status: 'ok', data: r }; }, function (e) {
+    api('upcoming').then(function (r) { S.upcoming = { status: 'ok', data: r }; saveCache(); }, function (e) {
       S.upcoming = { status: 'error', error: /不明な操作|使えません/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message, data: cur && cur.data };
-    }).then(function () { renderUpcoming(); renderTabsBadge(); });
+    }).then(function () {
+      // 備考を打っている途中なら描き直さない（前回の分を出している間に打ち始めても、文字が消えないように。v34〜）。入力欄を離れたら描く
+      var el = document.activeElement;
+      if (el && /^(INPUT|TEXTAREA)$/.test(el.tagName) && byId('evList').contains(el)) S.deferRender = true;
+      else renderUpcoming();
+      renderTabsBadge();
+    });
   }
 
   /** 受付中で、その選手が○の日を含み、まだ回答していない（日時が変わって要確認も）予定 → 「参加しますか？」 */
@@ -1494,7 +1514,7 @@
     var st = S.upcoming;
     var status = byId('evStatus');
     if (S.ansMsg) { status.textContent = S.ansMsg.text; status.className = 'ev-status ' + S.ansMsg.kind; }
-    else if (!st || st.status === 'loading') { status.textContent = st && st.data ? '最新を確認中…' : '読み込み中…'; status.className = 'ev-status busy'; }
+    else if (!st || st.status === 'loading' || st.status === 'cached') { status.textContent = st && st.data ? '最新を確認中…' : '読み込み中…'; status.className = 'ev-status busy'; }
     else if (st.status === 'error') { status.textContent = '⚠ 読み込めませんでした：' + st.error; status.className = 'ev-status ng'; }
     else { status.textContent = ''; status.className = 'ev-status'; }
     byId('evOrphans').innerHTML = '';
@@ -1525,7 +1545,7 @@
     }, function (e) {
       var msg = e.code === 'bad_request' && /不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です。更新後に「最新にする」を押してください' : e.message;
       S.events[month] = { status: 'error', error: msg, data: cur && cur.data, at: cur && cur.at };
-    }).then(function () { if (S.tab === 'events') renderSafe(); else renderEvents(); if (S.tab === 'plan') renderPlan(); });
+    }).then(function () { if (S.tab === 'events') renderSafe(); else renderEvents(); if (S.tab === 'plan') renderPlan(); if (S.tab === 'cal') renderCalTab(); });
   }
 
   /** 管理者の操作。成功したらサーバーが返した月の予定で描き直す。then は続けて行う操作 */
@@ -2589,7 +2609,8 @@
   function setupCalTab() {
     var tab = byId('tab-cal');
     S.calView = 'month';
-    S.calData = {};
+    // スタッフ・管理者：カレンダーは「予定と担当」と同じ月の予定を使う（同じものを2回読まない・前回の分もすぐ出る。v34〜）
+    S.calData = S.family ? (S.calData || {}) : S.events;
     tab.querySelector('.cal-prev').addEventListener('click', function () { calMove(-1); });
     tab.querySelector('.cal-next').addEventListener('click', function () { calMove(1); });
     tab.querySelector('.cal-today').addEventListener('click', function () {
@@ -2638,11 +2659,13 @@
   }
 
   function calLoad(month, force) {
+    if (!S.family) return loadEvents(month, force);
     var cur = S.calData[month];
     if (cur && (cur.status === 'loading' || (cur.status === 'ok' && !force && Date.now() - cur.at < 60000))) return;
     S.calData[month] = { status: 'loading', data: cur && cur.data };
     api('events', { month: month }).then(function (r) {
       S.calData[month] = { status: 'ok', data: r, at: Date.now() };
+      saveCache();
     }, function (e) {
       S.calData[month] = { status: 'error', error: e.message, data: cur && cur.data };
     }).then(function () { if (S.tab === 'cal') renderCalTab(); });
@@ -2715,8 +2738,9 @@
     var items = calEventsOf(S.calMonth);
     var st = S.calData[S.calMonth] || {};
     var msg = byId('calStatusMsg');
-    msg.textContent = st.status === 'error' ? '⚠ 読み込めませんでした：' + st.error : (!items ? '読み込み中…' : '');
-    msg.className = 'ev-status' + (st.status === 'error' ? ' ng' : !items ? ' busy' : '');
+    var checking = st.status === 'loading' || st.status === 'cached';   // 前回の分を出して、最新を確認中（v34〜）
+    msg.textContent = st.status === 'error' ? '⚠ 読み込めませんでした：' + st.error : (!items ? '読み込み中…' : checking ? '最新を確認中…' : '');
+    msg.className = 'ev-status' + (st.status === 'error' ? ' ng' : !items || checking ? ' busy' : '');
     byId('calBody').innerHTML = calMonthHtml(S.calMonth, items || []);
     renderCalDay(items || []);
   }
@@ -2790,17 +2814,18 @@
 
   /** 一覧：期間の全部の月をまとめて日付順。終わった予定は畳む */
   function renderCalList() {
-    var months = monthsOf(S.period), seen = {}, all = [], loading = false, err = '';
+    var months = monthsOf(S.period), seen = {}, all = [], loading = false, checking = false, err = '';
     months.forEach(function (m) {
       var st = S.calData[m] || {};
       if (st.status === 'error') err = st.error;
+      if (st.status === 'loading' || st.status === 'cached') checking = true;
       var items = calEventsOf(m);
       if (!items) { loading = true; return; }
       items.forEach(function (x) { if (!seen[x.ev.key]) { seen[x.ev.key] = true; all.push(x); } });
     });
     var msg = byId('calStatusMsg');
-    msg.textContent = err ? '⚠ 一部を読み込めませんでした：' + err : loading ? '読み込み中…' : '';
-    msg.className = 'ev-status' + (err ? ' ng' : loading ? ' busy' : '');
+    msg.textContent = err ? '⚠ 一部を読み込めませんでした：' + err : loading ? '読み込み中…' : checking ? '最新を確認中…' : '';
+    msg.className = 'ev-status' + (err ? ' ng' : loading || checking ? ' busy' : '');
     all.sort(function (a, b) { return a.ev.dates[0] < b.ev.dates[0] ? -1 : a.ev.dates[0] > b.ev.dates[0] ? 1 : (a.ev.title < b.ev.title ? -1 : 1); });
     var today = todayJst();
     var past = all.filter(function (x) { return x.ev.dates[x.ev.dates.length - 1] < today; });
@@ -2928,6 +2953,7 @@
   function loadTalkSummary() {
     api('talkSummary').then(function (r) {
       S.talkSum = r; S.talkSumErr = null;
+      saveCache();
     }, function (e) {
       S.talkSumErr = /不明な操作|使えません/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message;
     }).then(function () { renderTalkBadges(); if (S.tab === 'talk') renderTalk(); });
