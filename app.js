@@ -187,7 +187,17 @@
 
   // ================================================================ 通信
 
-  function api(action, body, timeoutMs) {
+  // 404・5xx・通信の途切れのときに1回だけ自動で送り直す操作（v36〜・城さん 2026-10-17）。
+  // ★ 404 は Google 側の転送（サーバーの処理のあと）で出ることがあるので、送り直しても結果が同じになる操作だけ：
+  //   読むだけの操作と、同じ内容で上書きする保存（○△×・役割・ピン）。トークの書き込み・Haiku君・反映などは送り直さない
+  var API_RETRY = {
+    bootstrap: 1, events: 1, upcoming: 1, inputEvents: 1, talkSummary: 1, talkGet: 1, calStatus: 1, calShares: 1, calShareList: 1,
+    staffList: 1, familyList: 1, deaconList: 1, lodgingList: 1, aiSuggestions: 1,
+    saveDays: 1, saveRoles: 1, talkPin: 1
+  };
+  var API_RETRY_MS = 800;
+
+  function api(action, body, timeoutMs, retried) {
     var payload = Object.assign({ action: action, token: token }, body || {});
     if (DEMO) return window.MicDemo.call(payload);
     var ctrl = new AbortController();
@@ -200,11 +210,16 @@
       redirect: 'follow',
       signal: ctrl.signal
     }).then(function (res) {
-      if (!res.ok) throw new Error('サーバーが応答しませんでした（' + res.status + '）');
+      if (!res.ok) {
+        var err = new Error('サーバーが応答しませんでした（' + res.status + '）');
+        err.retry = res.status === 404 || res.status >= 500;
+        throw err;
+      }
       return res.json().catch(function () { throw new Error('サーバーの応答を読めませんでした'); });
     }, function (e) {
       var err = new Error(e && e.name === 'AbortError' ? '時間内に応答がありませんでした' : '通信できませんでした。電波の状態を確認してください');
       if (e && e.name === 'AbortError') err.code = 'timeout';
+      else err.retry = true;
       throw err;
     }).then(function (data) {
       if (!data || data.ok !== true) {
@@ -213,7 +228,15 @@
         throw err;
       }
       return data;
-    }).finally(function () { clearTimeout(timer); });
+    }).finally(function () { clearTimeout(timer); }).catch(function (err) {
+      if (!err.retry) throw err;
+      if (!retried && API_RETRY[action]) {
+        return new Promise(function (ok) { setTimeout(ok, API_RETRY_MS); }).then(function () { return api(action, body, timeoutMs, true); });
+      }
+      // 送り直さない保存：サーバーでは保存できている場合がある（二重にしないため自動では送らない）
+      if (!API_RETRY[action] && action !== 'aiAsk') err.message += '。保存できているかもしれないので、画面を読み直して確かめてから、必要ならもう一度押してください';
+      throw err;
+    });
   }
 
   function parseToken() {
@@ -330,7 +353,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261017e';
+  var APP_VERSION = '20261017f';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
