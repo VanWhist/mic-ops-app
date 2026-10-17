@@ -322,7 +322,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261016c';
+  var APP_VERSION = '20261017b';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -387,6 +387,7 @@
     setupCalSync();
     setupBulkOpen();
     setupTalk();
+    setupCalTab();
     renderAll();
     loadTalkSummary();   // トークの未読（タブ・予定カードのバッジ）
     if (S.tab === 'events' || S.family) loadEvents(S.month);   // 家族は「参加しますか？」の件数をタブに出すため最初に読む
@@ -505,6 +506,8 @@
   function setupTabs() {
     var nav = byId('tabs');
     nav.hidden = false;
+    nav.addEventListener('scroll', tabsEdges, { passive: true });
+    window.addEventListener('resize', tabsEdges);
     nav.querySelectorAll('.tab').forEach(function (b) {
       if (S.me.isAdmin && b.dataset.tab === 'mine') b.hidden = true;
       if (b.dataset.tab === 'staff' || b.dataset.tab === 'plan') b.hidden = !S.me.isAdmin;
@@ -520,12 +523,31 @@
         if (S.tab === 'staff') { loadStaffAdmin(); loadFamilies(); loadAiSuggestions(); loadLodgings(); }
         if (S.tab === 'plan') renderPlan();
         if (S.tab === 'talk') { S.talkOpen = null; loadTalkSummary(); renderTalk(); }   // トーク（v30〜）：開くたびに一覧を読み直す
+        if (S.tab === 'cal') calOpen();   // カレンダー（v32〜）
       });
     });
     document.querySelectorAll('.month-nav').forEach(function (nav) {
       nav.querySelector('.prev').addEventListener('click', function () { moveMonth(-1); });
       nav.querySelector('.next').addEventListener('click', function () { moveMonth(1); });
     });
+  }
+
+  /** タブの横スクロール（v32〜）：選んだタブが見えるようにし、まだタブがある側の端をぼかす */
+  function tabsScrollToActive() {
+    var nav = byId('tabs'), on = nav && nav.querySelector('.tab.on');
+    if (!nav || nav.hidden) return;
+    if (on) {
+      var l = on.offsetLeft - nav.offsetLeft, r = l + on.offsetWidth;
+      if (l < nav.scrollLeft + 16) nav.scrollLeft = Math.max(0, l - 16);
+      else if (r > nav.scrollLeft + nav.clientWidth - 16) nav.scrollLeft = r - nav.clientWidth + 16;
+    }
+    tabsEdges();
+  }
+  function tabsEdges() {
+    var nav = byId('tabs');
+    if (!nav) return;
+    nav.classList.toggle('more-l', nav.scrollLeft > 2);
+    nav.classList.toggle('more-r', nav.scrollLeft + nav.clientWidth < nav.scrollWidth - 2);
   }
 
   function moveMonth(d) {
@@ -1284,6 +1306,7 @@
     var n = d ? askList(d.events).length : 0;
     var b = document.querySelector('.tab[data-tab="events"]');
     if (b) b.textContent = '練習会など' + (n ? '（' + n + '）' : '');
+    tabsEdges();
   }
 
   // ---- 参加の回答（v15〜日ごと＋時間指定）
@@ -1452,7 +1475,7 @@
 
   function familyCard(ev, asking) {
     var a = ev.answers;
-    var h = '<article class="ev' + (asking ? ' ask' : '') + '"><div class="ev-date">' + evDateLabel(ev) + '</div>' +
+    var h = '<article class="ev' + (asking ? ' ask' : '') + '"' + (asking ? '' : ' data-key="' + esc(ev.key) + '"') + '><div class="ev-date">' + evDateLabel(ev) + '</div>' +
       '<h3 class="ev-title">' + esc(ev.title) + '</h3>' + (ev.location ? '<div class="ev-loc">' + esc(ev.location) + '</div>' : '') +
       '<div class="badges"><span class="badge type">' + esc(ev.type === '練習' ? '練習会' : ev.type) + '</span>' + (ev.tentative ? '<span class="badge tent">仮</span>' : '') +
       (a ? '<span class="badge ' + (a.open ? 'venue' : 'novenue') + '">' + (a.open ? '参加の受付中' : '受付前') + '</span>' : '') + '</div>';
@@ -2552,6 +2575,280 @@
     byId('reissueAdminBtn').disabled = !!S.stBusy;
   }
 
+  // ================================================================ カレンダー（v32〜・城さん依頼 2026-10-17）
+  //
+  // ★ 管理者・スタッフ・家族の全員。Google カレンダーの埋め込みではなく、アプリのデータ（events）で描く
+  // ★ 出すのは練習会・合宿・大会だけ（下書き・置き換え済み・中止は出さない）。予定名は直した名前（v31〜）
+  // ★ 月：7列の表に帯（複数日は1本）。1日に多いときは「+n」で畳む。左右スワイプ・［‹ ›］で月送り、［今日］。今日を強調
+  // ★ 一覧：日付順。終わった予定は畳む
+  // ★ 自分の印だけ重ねる：家族＝自分の家族の参加（参加／不参加／未回答）、スタッフ＝自分の○△×と担当。ほかの人の○・参加はマス目に出さない
+  // ★ 帯・予定をタップすると「予定と担当」（家族は「練習会など」）のその予定のカードへ
+
+  var CAL_TYPES = { '練習': '練習会', '合宿': '合宿', '大会': '大会' };
+  var CAL_LANES = 3;   // 1週の帯の段数。超えた分は「+n」
+
+  function setupCalTab() {
+    var tab = byId('tab-cal');
+    S.calView = 'month';
+    S.calData = {};
+    tab.querySelector('.cal-prev').addEventListener('click', function () { calMove(-1); });
+    tab.querySelector('.cal-next').addEventListener('click', function () { calMove(1); });
+    tab.querySelector('.cal-today').addEventListener('click', function () {
+      S.calMonth = calTodayMonth(); S.calDay = todayJst() <= periodLastDay() ? todayJst() : null; calOpen();
+    });
+    tab.querySelectorAll('.cv-btn').forEach(function (b) {
+      b.addEventListener('click', function () { S.calView = b.dataset.cv; S.calDay = null; calOpen(); });
+    });
+    tab.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-cal-ev]');
+      if (b) { calGoCard(b.dataset.calEv, b.dataset.month); return; }
+      var d = e.target.closest('[data-cal-day]');
+      if (d) { S.calDay = S.calDay === d.dataset.calDay ? null : d.dataset.calDay; renderCalTab(); }
+    });
+    // 左右スワイプで月送り（縦のスクロールは邪魔しない）
+    var x0 = null, y0 = null;
+    byId('calBody').addEventListener('touchstart', function (e) { var t = e.touches[0]; x0 = t.clientX; y0 = t.clientY; }, { passive: true });
+    byId('calBody').addEventListener('touchend', function (e) {
+      if (x0 == null || S.calView !== 'month') return;
+      var t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
+      x0 = null;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) calMove(dx < 0 ? 1 : -1);
+    });
+  }
+
+  function calTodayMonth() {
+    var months = monthsOf(S.period), t = todayJst().slice(0, 7);
+    return months.indexOf(t) >= 0 ? t : (t < months[0] ? months[0] : months[months.length - 1]);
+  }
+
+  function calMove(d) {
+    var months = monthsOf(S.period);
+    var i = months.indexOf(S.calMonth || calTodayMonth()) + d;
+    if (i < 0 || i >= months.length) return;
+    S.calMonth = months[i];
+    S.calDay = null;
+    calOpen();
+  }
+
+  /** 表示に要る月を読む（月の表＝その月、一覧＝期間の全部の月） */
+  function calOpen() {
+    S.calMonth = S.calMonth || calTodayMonth();
+    var months = S.calView === 'list' ? monthsOf(S.period) : [S.calMonth];
+    months.forEach(function (m) { calLoad(m); });
+    renderCalTab();
+  }
+
+  function calLoad(month, force) {
+    var cur = S.calData[month];
+    if (cur && (cur.status === 'loading' || (cur.status === 'ok' && !force && Date.now() - cur.at < 60000))) return;
+    S.calData[month] = { status: 'loading', data: cur && cur.data };
+    api('events', { month: month }).then(function (r) {
+      S.calData[month] = { status: 'ok', data: r, at: Date.now() };
+    }, function (e) {
+      S.calData[month] = { status: 'error', error: e.message, data: cur && cur.data };
+    }).then(function () { if (S.tab === 'cal') renderCalTab(); });
+  }
+
+  /** カレンダーに出す予定か（練習会・合宿・大会。下書き・置き換え済み・中止は出さない） */
+  function calShown(ev) {
+    return !!CAL_TYPES[ev.type] && !ev.cancelled && !ev.replaced && ev.appStatus !== '下書き' && (!S.family || ev.avail);
+  }
+
+  /** 表示する月の予定（ほかの月から続く予定も、その月のデータに入っている） */
+  function calEventsOf(month) {
+    var st = S.calData[month];
+    var d = st && st.data;
+    return d && d.events ? d.events.filter(calShown).map(function (ev) { return { ev: ev, month: month }; }) : null;
+  }
+
+  /** 家族：その予定のその日の、自分の家族の参加（参／不／未）。受付がなく回答もなければ '' */
+  function calFamMark(ev, date) {
+    var a = ev.answers;
+    if (!a || ev.dates.indexOf(date) < 0) return '';
+    var any = false, allNo = true, un = false;
+    S.myAthletes.forEach(function (id) {
+      var m = a.mine && a.mine[id], v = m && m.days ? m.days[date] : null;
+      if (v && (v.k === '終日' || v.k === '時間' || v.k === '午前' || v.k === '午後')) { any = true; allNo = false; }
+      else if (v && v.k === '不参加') { /* 不参加 */ }
+      else { un = true; allNo = false; }
+    });
+    if (any) return '参';
+    if (allNo && S.myAthletes.length) return '不';
+    return a.open && un ? '未' : '';
+  }
+
+  /** スタッフ：自分がその予定のその日の担当か */
+  function calMine(ev, date) {
+    if (!S.me.staffId) return false;
+    return (ev.assigned || []).some(function (a) { return a.staffId === S.me.staffId && (!a.days || a.days.indexOf(date) >= 0); });
+  }
+
+  /** 日のマスの自分の印：スタッフ＝自分の○△×、家族＝参加（その日の予定のうち、参 > 未 > 不） */
+  function calDayMark(date, items) {
+    if (S.family) {
+      var best = '';
+      items.forEach(function (x) { var m = calFamMark(x.ev, date); if (m === '参' || (m === '未' && best !== '参') || (m === '不' && !best)) best = m; });
+      return best ? '<span class="cm cm-' + ({ '参': 'yes', '不': 'no', '未': 'un' })[best] + '">' + best + '</span>' : '';
+    }
+    if (S.me.staffId) {
+      var v = valueOf(S.me.staffId, date);
+      return v.s ? '<span class="cm cm-av ' + ({ '○': 's-o', '△': 's-t', '×': 's-x' })[v.s] + '">' + v.s + '</span>' : '';
+    }
+    return '';
+  }
+
+  function calBarClass(ev) { return 'cb cb-' + ({ '練習': 'prac', '合宿': 'camp', '大会': 'comp' })[ev.type]; }
+
+  function renderCalTab() {
+    var tab = byId('tab-cal');
+    if (!tab || !S.me || S.tab !== 'cal') return;
+    S.calMonth = S.calMonth || calTodayMonth();
+    var months = monthsOf(S.period);
+    tab.querySelectorAll('.cv-btn').forEach(function (b) { b.classList.toggle('on', b.dataset.cv === S.calView); b.setAttribute('aria-pressed', b.dataset.cv === S.calView); });
+    tab.querySelector('.cal-nav').hidden = S.calView !== 'month';
+    tab.querySelector('.cal-label').textContent = S.calMonth.slice(0, 4) + '年' + (+S.calMonth.slice(5, 7)) + '月';
+    tab.querySelector('.cal-prev').disabled = months.indexOf(S.calMonth) <= 0;
+    tab.querySelector('.cal-next').disabled = months.indexOf(S.calMonth) >= months.length - 1;
+    byId('calLegend').innerHTML = Object.keys(CAL_TYPES).map(function (t) { return '<span class="cl"><i class="' + calBarClass({ type: t }) + '"></i>' + CAL_TYPES[t] + '</span>'; }).join('') +
+      (S.family ? '<span class="cl"><span class="cm cm-yes">参</span>参加 <span class="cm cm-no">不</span>不参加 <span class="cm cm-un">未</span>未回答（自分の家族）</span>'
+        : S.me.staffId ? '<span class="cl">自分の○△×・<b>担</b>＝自分の担当</span>' : '');
+    if (S.calView === 'list') return renderCalList();
+    var items = calEventsOf(S.calMonth);
+    var st = S.calData[S.calMonth] || {};
+    var msg = byId('calStatusMsg');
+    msg.textContent = st.status === 'error' ? '⚠ 読み込めませんでした：' + st.error : (!items ? '読み込み中…' : '');
+    msg.className = 'ev-status' + (st.status === 'error' ? ' ng' : !items ? ' busy' : '');
+    byId('calBody').innerHTML = calMonthHtml(S.calMonth, items || []);
+    renderCalDay(items || []);
+  }
+
+  /** 月の表。週ごとに CSS グリッド（1行目＝日付、2行目から帯の段、最後＝「+n」） */
+  function calMonthHtml(month, items) {
+    var days = daysOf(month), today = todayJst();
+    var first = days[0], lead = weekday(first);
+    var cells = [];
+    for (var i = lead; i > 0; i--) cells.push(addDays(first, -i));
+    days.forEach(function (d) { cells.push(d); });
+    while (cells.length % 7) cells.push(addDays(cells[cells.length - 1], 1));
+    var h = '<div class="cal-month"><div class="cal-wd">' + WD.map(function (w, i) { return '<span class="' + (i === 0 ? 'sun' : i === 6 ? 'sat' : '') + '">' + w + '</span>'; }).join('') + '</div>';
+    for (var w = 0; w < cells.length; w += 7) {
+      var week = cells.slice(w, w + 7);
+      var ws = week[0], we = week[6];
+      var evs = items.filter(function (x) { var d = x.ev.dates; return d[0] <= we && d[d.length - 1] >= ws; });
+      evs.sort(function (a, b) { var la = a.ev.dates.length, lb = b.ev.dates.length; return a.ev.dates[0] < b.ev.dates[0] ? -1 : a.ev.dates[0] > b.ev.dates[0] ? 1 : lb - la; });
+      var lanes = [], hidden = {};
+      var bars = '';
+      evs.forEach(function (x) {
+        var d = x.ev.dates;
+        var s = Math.max(0, week.indexOf(d[0] < ws ? ws : d[0])), e = week.indexOf(d[d.length - 1] > we ? we : d[d.length - 1]);
+        if (e < 0) e = 6;
+        var lane = -1;
+        for (var L = 0; L < CAL_LANES; L++) { if (!lanes[L] || lanes[L] < s) { lane = L; break; } }
+        if (lane < 0) { for (var c = s; c <= e; c++) hidden[c] = (hidden[c] || 0) + 1; return; }
+        lanes[lane] = e;
+        var mine = week.slice(s, e + 1).some(function (dd) { return calMine(x.ev, dd); });
+        var cont = d[0] < week[s] ? ' cont-l' : '', more = d[d.length - 1] > week[e] ? ' cont-r' : '';
+        bars += '<button type="button" class="' + calBarClass(x.ev) + cont + more + '" style="grid-column:' + (s + 1) + '/span ' + (e - s + 1) + ';grid-row:' + (lane + 2) + '" data-cal-ev="' + esc(x.ev.key) + '" data-month="' + esc(x.month) + '" title="' + esc(x.ev.title) + '">' +
+          (mine ? '<b class="cb-mine">担</b>' : '') + esc(x.ev.title) + '</button>';
+      });
+      var heads = week.map(function (d, i) {
+        var dayItems = items.filter(function (x) { return x.ev.dates.indexOf(d) >= 0; });
+        var cls = 'cd' + (d.slice(0, 7) !== month ? ' out' : '') + (d === today ? ' today' : '') + (S.calDay === d ? ' sel' : '') + (i === 0 || HOLIDAYS[d] ? ' sun' : i === 6 ? ' sat' : '');
+        return '<button type="button" class="' + cls + '" style="grid-column:' + (i + 1) + ';grid-row:1/-1" data-cal-day="' + d + '" aria-label="' + esc(longDate(d)) + (dayItems.length ? '・予定' + dayItems.length + '件' : '') + '">' +
+          '<span class="cd-n">' + (+d.slice(8, 10)) + '</span>' + (d.slice(0, 7) === month ? calDayMark(d, dayItems) : '') + '</button>';
+      }).join('');
+      var mores = Object.keys(hidden).map(function (c) {
+        return '<button type="button" class="cmore" style="grid-column:' + (+c + 1) + ';grid-row:' + (CAL_LANES + 2) + '" data-cal-day="' + week[c] + '">+' + hidden[c] + '</button>';
+      }).join('');
+      h += '<div class="cal-week" style="grid-template-rows:26px repeat(' + CAL_LANES + ',20px) 18px">' + heads + bars + mores + '</div>';
+    }
+    return h + '</div>';
+  }
+
+  /** 日をタップしたとき：その日の予定（＋自分の印）。予定をタップするとカードへ */
+  function renderCalDay(items) {
+    var box = byId('calDayBox');
+    var d = S.calDay;
+    if (!d || S.calView !== 'month') { box.innerHTML = ''; return; }
+    var list = items.filter(function (x) { return x.ev.dates.indexOf(d) >= 0; });
+    box.innerHTML = '<div class="cal-day"><h3>' + esc(longDate(d)) + 'の予定</h3>' + (list.length ? '<ul class="cal-items">' + list.map(function (x) { return calItemHtml(x, d); }).join('') + '</ul>' : '<p class="muted">練習会・合宿・大会はありません。</p>') + '</div>';
+  }
+
+  function calItemHtml(x, date) {
+    var ev = x.ev, d = ev.dates;
+    var range = md(d[0]) + (d.length > 1 ? '〜' + md(d[d.length - 1]) : '');
+    var mark = '';
+    if (S.family && date) { var fm = calFamMark(ev, date); if (fm) mark = '<span class="cm cm-' + ({ '参': 'yes', '不': 'no', '未': 'un' })[fm] + '">' + fm + '</span>'; }
+    if (!S.family && date && calMine(ev, date)) mark = '<b class="cb-mine">担</b>';
+    if (S.family && !date) {
+      var ms = d.map(function (dd) { return calFamMark(ev, dd); });
+      mark = ms.indexOf('参') >= 0 ? '<span class="cm cm-yes">参</span>' : ms.indexOf('未') >= 0 ? '<span class="cm cm-un">未</span>' : ms.indexOf('不') >= 0 ? '<span class="cm cm-no">不</span>' : '';
+    }
+    if (!S.family && !date && d.some(function (dd) { return calMine(ev, dd); })) mark = '<b class="cb-mine">担</b>';
+    return '<li><button type="button" class="cal-item" data-cal-ev="' + esc(ev.key) + '" data-month="' + esc(x.month) + '"><i class="' + calBarClass(ev) + '"></i>' +
+      '<span class="ci-date">' + esc(range) + '</span><span class="ci-title">' + esc(ev.title) + '</span>' + mark + '</button></li>';
+  }
+
+  /** 一覧：期間の全部の月をまとめて日付順。終わった予定は畳む */
+  function renderCalList() {
+    var months = monthsOf(S.period), seen = {}, all = [], loading = false, err = '';
+    months.forEach(function (m) {
+      var st = S.calData[m] || {};
+      if (st.status === 'error') err = st.error;
+      var items = calEventsOf(m);
+      if (!items) { loading = true; return; }
+      items.forEach(function (x) { if (!seen[x.ev.key]) { seen[x.ev.key] = true; all.push(x); } });
+    });
+    var msg = byId('calStatusMsg');
+    msg.textContent = err ? '⚠ 一部を読み込めませんでした：' + err : loading ? '読み込み中…' : '';
+    msg.className = 'ev-status' + (err ? ' ng' : loading ? ' busy' : '');
+    all.sort(function (a, b) { return a.ev.dates[0] < b.ev.dates[0] ? -1 : a.ev.dates[0] > b.ev.dates[0] ? 1 : (a.ev.title < b.ev.title ? -1 : 1); });
+    var today = todayJst();
+    var past = all.filter(function (x) { return x.ev.dates[x.ev.dates.length - 1] < today; });
+    var next = all.filter(function (x) { return x.ev.dates[x.ev.dates.length - 1] >= today; });
+    var h = past.length ? '<details class="cal-past"><summary>終わった予定（' + past.length + '件）</summary><ul class="cal-items">' + past.map(function (x) { return calItemHtml(x, null); }).join('') + '</ul></details>' : '';
+    h += next.length ? '<ul class="cal-items">' + next.map(function (x) { return calItemHtml(x, null); }).join('') + '</ul>' : (loading ? '' : '<p class="muted">これからの練習会・合宿・大会はありません。</p>');
+    byId('calBody').innerHTML = h;
+    byId('calDayBox').innerHTML = '';
+  }
+
+  /** 帯・予定をタップ：その予定のカードへ（スタッフ・管理者＝予定と担当、家族＝練習会など） */
+  function calGoCard(key, month) {
+    if (S.family) {
+      var up = S.upcoming && S.upcoming.data && S.upcoming.data.events;
+      var ev0 = null;
+      Object.keys(S.calData).forEach(function (m) { var d = S.calData[m].data; (d && d.events || []).forEach(function (x) { if (x.key === key) ev0 = x; }); });
+      if (ev0 && ev0.dates[ev0.dates.length - 1] < todayJst()) {
+        byId('calStatusMsg').textContent = '「' + ev0.title + '」は終わった予定です（「練習会など」には出ません）';
+        byId('calStatusMsg').className = 'ev-status';
+        return;
+      }
+      S.tab = 'events';
+      S.ansMsg = null;
+      renderAll();
+      loadEvents(S.month, !up);
+    } else {
+      S.tab = 'events';
+      S.month = month;
+      S.openEvent = null;
+      renderAll();
+      loadEvents(month);
+    }
+    calFocusCard(key, 0);
+  }
+
+  /** カードが描かれるのを待って、そこまでスクロールして光らせる */
+  function calFocusCard(key, n) {
+    var el = document.querySelector('#evList > article.ev[data-key="' + (window.CSS && CSS.escape ? CSS.escape(key) : key) + '"]');
+    if (el) {
+      el.scrollIntoView({ block: 'start', behavior: n ? 'smooth' : 'auto' });
+      el.classList.add('cal-flash');
+      setTimeout(function () { el.classList.remove('cal-flash'); }, 2000);
+      return;
+    }
+    if (n < 40) setTimeout(function () { calFocusCard(key, n + 1); }, 150);
+  }
+
   // ================================================================ 予定のトーク（v30〜・城さん確定 2026-10-16）
   //
   // ★ 予定ごとに1つのトーク（練習会・合宿・大会）。管理者・スタッフ全員・家族全員が見て書ける。文字だけ・500字まで
@@ -2621,6 +2918,7 @@
     var b = document.querySelector('.tab[data-tab="talk"]');
     var n = S.talkSum ? S.talkSum.unreadTotal || 0 : 0;
     if (b) b.innerHTML = 'トーク' + (n ? '<span class="talk-badge">' + n + '</span>' : '');
+    tabsEdges();
     document.querySelectorAll('[data-talk-open]').forEach(function (x) {
       var ev = talkEventByKey(x.dataset.talkOpen);
       var c = ev && S.talkSum && S.talkSum.unread ? S.talkSum.unread[ev.talkKey] || 0 : 0;
@@ -3773,7 +4071,8 @@
     applyAppName();
     if (!S.me || !S.uiReady || S.dead) return;
     document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === S.tab); });
-    ['mine', 'all', 'plan', 'events', 'talk', 'roles', 'staff'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
+    tabsScrollToActive();   // タブが横にはみ出すとき、選んだタブを見える位置に（v32〜）
+    ['mine', 'all', 'cal', 'plan', 'events', 'talk', 'roles', 'staff'].forEach(function (t) { byId('tab-' + t).hidden = S.tab !== t; });
     renderMonthLabels();
     renderMine();
     renderGrid();
@@ -3781,6 +4080,7 @@
     renderPlan();
     renderRolesTable();
     renderTalk();
+    renderCalTab();
     renderSaveState();
     renderAsOf();
   }

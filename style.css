@@ -625,3 +625,68 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 /* 予定名を直す（v31〜） */
 .ev-orig { font-size: 13px; margin: -2px 0 4px; overflow-wrap: anywhere; }
 .ev-name input[name="evname"] { width: 100%; box-sizing: border-box; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+/* カレンダー（v32〜） */
+.cal-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 6px; }
+.cal-view { display: inline-flex; border: 1px solid var(--accent); border-radius: 8px; overflow: hidden; }
+.cv-btn { min-height: 40px; min-width: 52px; border: 0; background: #fff; color: var(--accent); font: inherit; font-weight: 700; padding: 4px 10px; }
+.cv-btn.on { background: var(--accent); color: #fff; }
+.cal-nav { display: inline-flex; align-items: center; gap: 4px; }
+.cal-nav[hidden] { display: none; }
+.cal-prev, .cal-next { min-width: 44px; min-height: 40px; border: 1px solid var(--line); background: #fff; border-radius: 8px; font-size: 20px; }
+.cal-prev:disabled, .cal-next:disabled { opacity: .35; }
+.cal-label { min-width: 6.2em; text-align: center; font-weight: 700; }
+.cal-today { min-height: 40px; border: 1px solid var(--accent); background: #fff; color: var(--accent); border-radius: 8px; padding: 4px 10px; font: inherit; }
+.cal-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted, #666); margin: 2px 0 6px; }
+.cal-legend .cl { display: inline-flex; align-items: center; gap: 4px; }
+.cal-legend i.cb { display: inline-block; width: 18px; height: 10px; border-radius: 3px; padding: 0; }
+.cal-month { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+.cal-wd { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 12px; background: #f4f6f9; border-bottom: 1px solid var(--line); }
+.cal-wd span { padding: 3px 0; }
+.cal-wd .sun, .cd.sun .cd-n { color: #c62828; }
+.cal-wd .sat, .cd.sat .cd-n { color: #1565c0; }
+.cal-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-bottom: 1px solid var(--line); position: relative; }
+.cal-week:last-child { border-bottom: 0; }
+.cd { position: relative; z-index: 0; border: 0; border-right: 1px solid #eef0f3; background: transparent; padding: 2px 3px; text-align: left; display: flex; align-items: flex-start; gap: 2px; font: inherit; min-width: 0; }
+.cd:nth-child(7) { border-right: 0; }
+.cd.out { background: #fafafa; }
+.cd.out .cd-n { opacity: .4; }
+.cd-n { font-size: 12px; line-height: 20px; min-width: 20px; text-align: center; border-radius: 10px; }
+.cd.today .cd-n { background: var(--accent); color: #fff !important; font-weight: 700; }
+.cd.today { background: #eef5ff; }
+.cd.sel { box-shadow: inset 0 0 0 2px var(--accent); }
+.cm { display: inline-block; font-size: 10px; line-height: 16px; min-width: 16px; text-align: center; border-radius: 4px; font-weight: 700; margin-top: 2px; }
+.cm-yes { background: #e3f4e5; color: #1b5e20; }
+.cm-no { background: #eceff1; color: #546e7a; }
+.cm-un { background: #fff3e0; color: #e65100; }
+.cm-av { background: #fff; }
+.cb { position: relative; z-index: 1; border: 0; margin: 1px 1px; padding: 0 4px; height: 18px; line-height: 18px; font-size: 11px; color: #fff; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; min-width: 0; font-family: inherit; }
+.cb.cont-l { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: 0; }
+.cb.cont-r { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-right: 0; }
+.cb-prac { background: #2e7d32; }
+.cb-camp { background: #1565c0; }
+.cb-comp { background: #e65100; }
+.cb-mine { display: inline-block; background: #fff; color: #333; border-radius: 3px; font-size: 10px; line-height: 14px; padding: 0 2px; margin-right: 3px; }
+.cmore { position: relative; z-index: 1; border: 0; background: transparent; color: var(--accent); font-size: 11px; font-weight: 700; padding: 0 3px; text-align: left; font-family: inherit; }
+.cal-day { margin: 10px 0; }
+.cal-day h3 { font-size: 15px; margin: 0 0 6px; }
+.cal-items { list-style: none; padding: 0; margin: 6px 0; }
+.cal-items li { margin: 0 0 6px; }
+.cal-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: inherit; color: inherit; }
+.cal-item i.cb { display: inline-block; flex: 0 0 auto; width: 6px; height: 28px; padding: 0; margin: 0; }
+.ci-date { flex: 0 0 auto; font-size: 13px; color: var(--muted, #666); min-width: 5.6em; }
+.ci-title { flex: 1 1 auto; overflow-wrap: anywhere; }
+.cal-past { margin: 6px 0; }
+.cal-past summary { min-height: 40px; display: flex; align-items: center; color: var(--muted, #666); }
+article.ev.cal-flash { box-shadow: 0 0 0 3px #ffb300; transition: box-shadow .3s; }
+.cm.s-o { color: var(--o); background: var(--o-bg); }
+.cm.s-t { color: var(--t); background: var(--t-bg); }
+.cm.s-x { color: var(--x); background: var(--x-bg); }
+/* タブが7つになっても1行に収める（v32〜）：文字の長さに合わせて幅を分ける */
+/* タブは横にスライドできる（v32〜 城さん 10/17）。入りきるときは幅いっぱいに広がり、入りきらないときは横にスクロール */
+.tabs { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; overscroll-behavior-x: contain; position: relative; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { flex: 1 0 auto; padding-left: 10px; padding-right: 10px; letter-spacing: -0.04em; }
+/* 右（左）にまだタブがあるときは端をぼかして知らせる */
+.tabs.more-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.tabs.more-l { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); }
+.tabs.more-l.more-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
