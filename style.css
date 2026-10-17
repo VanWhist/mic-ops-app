@@ -725,3 +725,7 @@ body.has-calback main { padding-bottom: calc(100px + env(safe-area-inset-bottom)
 .talk-sum-btns button { min-height: 44px; }
 .talk-msg.haiku { background: #f6f9ff; border-color: #b9cdf5; }
 .talk-sum-btns .ghost2 { background: #fff; color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; padding: 6px 14px; font: inherit; font-weight: 700; }
+/* v37.1：右下の Haiku君（60px）が［送信］［トークに載せる］に重ならないよう、右に余白を空ける */
+body.has-ai .talk-form-row { padding-right: calc(68px + env(safe-area-inset-right)); }
+body.has-ai .talk-sum-box .talk-form-row { padding-right: 0; }   /* まとめの欄は書く欄より上にあり、Haiku君と重ならない */
+.talk-sum-btns button { white-space: nowrap; }
