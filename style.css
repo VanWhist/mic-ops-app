@@ -690,3 +690,13 @@ article.ev.cal-flash { box-shadow: 0 0 0 3px #ffb300; transition: box-shadow .3s
 .tabs.more-r { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
 .tabs.more-l { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent); }
 .tabs.more-l.more-r { -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+
+/* カレンダーに戻る（v33〜）：カレンダーから予定のカードへ飛んだあと、左下に出す（右下は Haiku君） */
+.cal-back {
+  position: fixed; z-index: 30; left: calc(16px + env(safe-area-inset-left)); bottom: calc(22px + env(safe-area-inset-bottom));
+  min-height: 48px; padding: 8px 18px; border-radius: 24px; border: 0; background: var(--accent); color: #fff;
+  font-size: 15px; font-weight: 700; box-shadow: 0 4px 14px rgba(20, 40, 80, .35); cursor: pointer;
+}
+.cal-back:active { transform: scale(.97); }
+.cal-back[hidden] { display: none; }
+body.has-calback main { padding-bottom: calc(100px + env(safe-area-inset-bottom)); }
