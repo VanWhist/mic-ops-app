@@ -729,3 +729,13 @@ body.has-calback main { padding-bottom: calc(100px + env(safe-area-inset-bottom)
 body.has-ai .talk-form-row { padding-right: calc(68px + env(safe-area-inset-right)); }
 body.has-ai .talk-sum-box .talk-form-row { padding-right: 0; }   /* まとめの欄は書く欄より上にあり、Haiku君と重ならない */
 .talk-sum-btns button { white-space: nowrap; }
+
+/* ボタンの「保存中…」表示（v38〜） */
+button.btn-busy { opacity: .6; cursor: progress; pointer-events: none; }
+.btn-flash { display: inline-block; margin: 2px 0 2px 8px; font-size: 13px; font-weight: 700; line-height: 1.4; vertical-align: middle; max-width: 100%; overflow-wrap: anywhere; }
+.btn-flash.row { display: block; margin: 4px 0 2px; }
+.btn-flash.ok { color: var(--o); }
+.btn-flash.ng { color: var(--ng); font-weight: 600; }
+.day .sv { position: absolute; top: 2px; right: 4px; font-size: 11px; font-weight: 700; line-height: 1; }
+.day.pending .sv { color: var(--accent); }
+.day.saved-now .sv { color: var(--o); }

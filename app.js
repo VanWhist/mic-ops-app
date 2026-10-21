@@ -197,7 +197,7 @@
   };
   var API_RETRY_MS = 800;
 
-  function api(action, body, timeoutMs, retried) {
+  function apiRaw(action, body, timeoutMs, retried) {
     var payload = Object.assign({ action: action, token: token }, body || {});
     if (DEMO) return window.MicDemo.call(payload);
     var ctrl = new AbortController();
@@ -231,12 +231,171 @@
     }).finally(function () { clearTimeout(timer); }).catch(function (err) {
       if (!err.retry) throw err;
       if (!retried && API_RETRY[action]) {
-        return new Promise(function (ok) { setTimeout(ok, API_RETRY_MS); }).then(function () { return api(action, body, timeoutMs, true); });
+        return new Promise(function (ok) { setTimeout(ok, API_RETRY_MS); }).then(function () { return apiRaw(action, body, timeoutMs, true); });
       }
       // 送り直さない保存：サーバーでは保存できている場合がある（二重にしないため自動では送らない）
       if (!API_RETRY[action] && action !== 'aiAsk') err.message += '。保存できているかもしれないので、画面を読み直して確かめてから、必要ならもう一度押してください';
       throw err;
     });
+  }
+
+  // ================================================================ ボタンの「保存中…」表示（v38〜・城さん 2026-10-21）
+  //
+  // ★ サーバーに書く操作（読むだけの操作と○△×の保存を除く）は、直前に押したボタンを
+  //   押した直後：「保存中…」「送信中…」など動作に合った言葉にして押せなくする（二重に押せない）
+  //   成功：ボタンの横に「✓ 保存しました」などを2.5秒出して元に戻す
+  //   失敗：何が起きたかと次にどうするかを出し、押せる状態に戻す（v36 の「読み直して確かめて」の案内はそのまま）
+  // ★ 処理のあとで画面を描き直しても、同じボタン（属性と置き場所が同じもの）を見つけて表示を保つ
+  // ★ ボタンのすぐ横にもともと結果の欄（role="status"）があるものは、その欄を生かして横には出さない
+  // ★ ○△×のタップは止めない（マスに小さく「…」→「✓」。上の「保存中…／保存しました」もそのまま）
+  var BTN_READ = {
+    bootstrap: 1, events: 1, upcoming: 1, inputEvents: 1, talkSummary: 1, talkGet: 1, calStatus: 1, calShares: 1, calShareList: 1,
+    staffList: 1, familyList: 1, deaconList: 1, lodgingList: 1, aiSuggestions: 1, saveDays: 1
+  };
+  var BTN_WORDS = {
+    talkPin: ['…', null], talkSummarize: ['まとめ中…', null], aiAsk: ['送信中…', null], aiSuggestionRead: ['変更中…', null],
+    aiApply: ['反映中…', '反映しました'], calSync: ['反映中…', null], setAnswerOpenMany: ['受付を始めています…', '受付を始めました'],
+    familyUrl: ['表示中…', null], staffUrl: ['表示中…', null],
+    reissueToken: ['再発行中…', '再発行しました'], reissueAdmin: ['再発行中…', '再発行しました'], familyReissue: ['再発行中…', '再発行しました'],
+    calShareAdd: ['共有中…', '共有しました'], calShareRemove: ['解除中…', '外しました'],
+    setActive: ['変更中…', '変更しました'], familySetActive: ['変更中…', '変更しました'], athleteSetActive: ['変更中…', '変更しました'],
+    setReplaced: ['変更中…', '変更しました'], deaconConfirm: ['確定中…', '確定しました']
+  };
+  var BTN_OK_MS = 2500, BTN_NG_MS = 10000;
+  var btnPressed = null, btnBusy = [], btnFlash = [], btnApplying = false;
+
+  function btnWords(action, body) {
+    if (action === 'importCalendarJoins') return body && body.apply ? ['取り込み中…', '取り込みました'] : ['照合中…', null];
+    if (action === 'talkPost') return body && body.kind === 'haiku' ? ['載せています…', '載せました'] : ['送信中…', '送りました'];
+    if (BTN_WORDS[action]) return BTN_WORDS[action];
+    if (/Delete|Remove/.test(action)) return ['削除中…', '削除しました'];
+    return ['保存中…', '保存しました'];
+  }
+
+  function btnFailText(e) {
+    var m = String(e && e.message || 'うまくいきませんでした');
+    if (/読み直して/.test(m)) return '⚠ ' + m;   // v36：二重になりうる操作の案内
+    if (e && e.code === 'timeout') return '⚠ ' + m + '。保存できているかもしれないので、画面を読み直して確かめてから、必要ならもう一度押してください';
+    if (e && (e.code === 'bad_request' || e.code === 'forbidden' || e.code === 'not_found')) return '⚠ ' + m;
+    return '⚠ ' + m + (/[。！）)]$/.test(m) ? '' : '。') + 'もう一度押してください';
+  }
+
+  /** ボタンの見分け方：属性（data-*・id・name）と、いちばん近い置き場所（data-key か id を持つ親） */
+  function btnKey(b) {
+    var parts = [b.id || '', b.name || '', b.type || ''], named = !!(b.id || b.name);
+    Array.prototype.forEach.call(b.attributes, function (a) { if (/^data-/.test(a.name) && !/^data-btn-/.test(a.name)) { parts.push(a.name + '=' + a.value); named = true; } });
+    var host = b.parentElement && b.parentElement.closest('[data-key],[id]');
+    if (host) parts.push('@' + (host.getAttribute('data-key') || '') + '#' + (host.id || ''));
+    if (!named) { var o = b.getAttribute('data-btn-orig'); parts.push('t=' + (o != null ? o.replace(/<[^>]*>/g, '') : b.textContent)); }   // 属性のないボタンは（元の）文字で
+    return parts.join('|');
+  }
+  function btnFind(key) {
+    return Array.prototype.filter.call(document.querySelectorAll('button'), function (b) { return b.isConnected && btnKey(b) === key; });
+  }
+
+  /** 押している途中・結果の表示を、いまの画面のボタンに付け直す（描き直されても消えないように） */
+  function btnApply() {
+    if (btnApplying) return;
+    btnApplying = true;
+    try {
+      var now = Date.now();
+      btnFlash = btnFlash.filter(function (f) { return f.until > now; });
+      btnBusy.forEach(function (x) {
+        btnFind(x.key).forEach(function (b) {
+          // ボタン本来の disabled には触らない（画面の処理が自分で切り替えるため）。押せないのは aria-disabled とクリックの止めで
+          if (b.getAttribute('data-btn-orig') == null) b.setAttribute('data-btn-orig', b.innerHTML);
+          if (b.textContent !== x.label) b.textContent = x.label;
+          if (!b.classList.contains('btn-busy')) { b.classList.add('btn-busy'); b.setAttribute('aria-busy', 'true'); b.setAttribute('aria-disabled', 'true'); }
+        });
+      });
+      var keep = [];
+      btnFlash.forEach(function (f) {
+        btnFind(f.key).forEach(function (b) {
+          var at = btnFlashAnchor(b), nx = at.nextElementSibling;
+          if (nx && nx.classList.contains('btn-flash') && nx.getAttribute('data-for') === f.key) {
+            if (nx.textContent !== f.text) nx.textContent = f.text;
+            if (!nx.classList.contains(f.kind)) nx.className = 'btn-flash ' + f.kind + (at !== b ? ' row' : '');
+            keep.push(nx);
+            return;
+          }
+          var sp = document.createElement(at !== b ? 'div' : 'span');
+          sp.className = 'btn-flash ' + f.kind + (at !== b ? ' row' : '');
+          sp.setAttribute('data-for', f.key);
+          sp.setAttribute('role', f.kind === 'ng' ? 'alert' : 'status');
+          sp.textContent = f.text;
+          at.insertAdjacentElement('afterend', sp);
+          keep.push(sp);
+        });
+      });
+      document.querySelectorAll('.btn-flash').forEach(function (el) { if (keep.indexOf(el) < 0) el.remove(); });
+    } finally {
+      btnApplying = false;
+    }
+  }
+
+  /** 結果を出す場所：ボタンが横並び（flex・grid）の行の中なら、その行のすぐ下（ボタンをつぶさないように） */
+  function btnFlashAnchor(b) {
+    var p = b.parentElement;
+    return p && p !== document.body && /flex|grid/.test(getComputedStyle(p).display) ? p : b;
+  }
+
+  /** ボタンのすぐ横（同じ親の中）に、もともとの結果の欄があるか */
+  function btnHasNearStatus(b) {
+    var p = b.parentElement;
+    if (!p) return false;
+    return Array.prototype.some.call(p.querySelectorAll('[role="status"]:not(.btn-flash), .roles-msg'), function (el) { return el !== b && el.textContent.trim(); });
+  }
+
+  function btnDone(entry, ok, text) {
+    btnBusy = btnBusy.filter(function (x) { return x !== entry; });
+    var bs = btnFind(entry.key);
+    bs.forEach(function (b) {
+      var orig = b.getAttribute('data-btn-orig');
+      if (orig != null) {
+        if (b.textContent === entry.label) b.innerHTML = orig;   // 描き直されていなければ元の文字に
+        b.removeAttribute('data-btn-orig');
+      }
+      if (b.classList.contains('btn-busy')) { b.classList.remove('btn-busy'); b.removeAttribute('aria-busy'); b.removeAttribute('aria-disabled'); }
+    });
+    var near = bs.some(btnHasNearStatus);
+    if (text && bs.length && !near) {
+      btnFlash = btnFlash.filter(function (f) { return f.key !== entry.key; });
+      var f = { key: entry.key, kind: ok ? 'ok' : 'ng', text: text, until: Date.now() + (ok ? BTN_OK_MS : BTN_NG_MS) };
+      btnFlash.push(f);
+      setTimeout(btnApply, (ok ? BTN_OK_MS : BTN_NG_MS) + 50);
+    }
+    btnApply();
+  }
+
+  document.addEventListener('click', function (e) {
+    var b = e.target && e.target.closest ? e.target.closest('button') : null;
+    if (!b) return;
+    var k = btnKey(b);
+    if (btnBusy.some(function (x) { return x.key === k; })) { e.preventDefault(); e.stopImmediatePropagation(); return; }   // 二重に押せない
+    btnFlash = btnFlash.filter(function (f) { return f.key !== k; });   // 押し直したら前の結果は消す
+    btnPressed = { key: k };
+    setTimeout(function () { btnPressed = null; }, 0);   // 押したときの処理（確認の画面を含む）の間だけ
+  }, true);
+  if (window.MutationObserver) {
+    new MutationObserver(function () {
+      if (btnApplying || (!btnBusy.length && !btnFlash.length)) return;
+      Promise.resolve().then(btnApply);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  /** サーバーを呼ぶ。書く操作なら、押したボタンに「保存中…」→「保存しました」を出す（v38〜） */
+  function api(action, body, timeoutMs) {
+    var bind = btnPressed && !BTN_READ[action] ? btnPressed : null;
+    var p = apiRaw(action, body, timeoutMs);
+    if (!bind) return p;
+    btnPressed = null;
+    var words = btnWords(action, body);
+    var entry = { key: bind.key, label: words[0] };
+    btnBusy.push(entry);
+    btnApply();
+    p.then(function () { setTimeout(function () { btnDone(entry, true, words[1] ? '✓ ' + words[1] : ''); }, 0); },
+      function (e) { setTimeout(function () { btnDone(entry, false, btnFailText(e)); }, 0); });
+    return p;
   }
 
   function parseToken() {
@@ -337,6 +496,7 @@
       });
       S.lastSaved = new Date();
       saveCache();
+      setTimeout(function () { if (!S.dead && S.uiReady) renderSafe(); }, BTN_OK_MS + 100);   // マスの「✓」を消す
     }, function (e) {
       days.forEach(function (d) { S.failed[d.date] = true; });
       S.error = e.message;
@@ -353,7 +513,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261017h';
+  var APP_VERSION = '20261021a';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -766,7 +926,9 @@
       var w = weekday(d);
       var cls = ['day', STATUS_CLASS[v.s]];
       if (w === 0 || HOLIDAYS[d]) cls.push('sun'); else if (w === 6) cls.push('sat');
-      if (S.pending.hasOwnProperty(d)) cls.push('pending');
+      var svMark = '';
+      if (S.pending.hasOwnProperty(d)) { cls.push('pending'); svMark = '…'; }
+      else if (S.savedAt[d] && Date.now() - S.savedAt[d] < BTN_OK_MS) { cls.push('saved-now'); svMark = '✓'; }   // 保存できた日は2.5秒「✓」（v38〜）
       if (S.failed[d]) cls.push('failed');
       if (S.rangeStart === d) cls.push('range-start');
       if (d === today) cls.push('today');
@@ -776,7 +938,7 @@
       var out = !inPeriod(d);   // 期間の終わり（calendar_end）より後の日は押せない（月の途中で終わるとき）
       if (out) cls.push('out');
       html += '<button type="button" class="' + cls.join(' ') + '" data-date="' + d + '" aria-label="' + esc(label) + '"' + (out ? ' disabled' : '') + '>' +
-        '<span class="dn">' + parts(d)[2] + '</span><span class="mk">' + esc(v.s) + '</span>' +
+        '<span class="dn">' + parts(d)[2] + '</span><span class="mk">' + esc(v.s) + '</span>' + (svMark ? '<span class="sv" aria-hidden="true">' + svMark + '</span>' : '') +
         (v.n ? '<span class="nd" aria-hidden="true"></span>' : '') +
         (evs.length ? '<span class="dev ' + inEvClass(evs[0].type) + '" aria-hidden="true">' + esc(shortTitle(evs[0].title)) + (evs.length > 1 ? '+' + (evs.length - 1) : '') + '</span>' : '') +
         '</button>';
