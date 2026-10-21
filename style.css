@@ -665,6 +665,7 @@ body.ai-open:not(.ai-large) main { padding-bottom: calc(max(300px, 42vh) + 24px)
 .cb-prac { background: #2e7d32; }
 .cb-camp { background: #1565c0; }
 .cb-comp { background: #e65100; }
+.cb-sair { background: #fbc02d; color: #3e2f00; }   /* S-air の練習会（v39〜）。黄色なので文字は濃い色 */
 .cb-mine { display: inline-block; background: #fff; color: #333; border-radius: 3px; font-size: 10px; line-height: 14px; padding: 0 2px; margin-right: 3px; }
 .cmore { position: relative; z-index: 1; border: 0; background: transparent; color: var(--accent); font-size: 11px; font-weight: 700; padding: 0 3px; text-align: left; font-family: inherit; }
 .cal-day { margin: 10px 0; }

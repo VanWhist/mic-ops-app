@@ -513,7 +513,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261021a';
+  var APP_VERSION = '20261021b';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -2904,7 +2904,9 @@
     return '';
   }
 
-  function calBarClass(ev) { return 'cb cb-' + ({ '練習': 'prac', '合宿': 'camp', '大会': 'comp' })[ev.type]; }
+  // S-air の練習会は黄色（v39〜・城さん 2026-10-21。Google カレンダー「MIC 予定（アプリ）」も同じ黄色）
+  function calIsSair(ev) { return ev.type === '練習' && ev.venue === 'S-air'; }
+  function calBarClass(ev) { return 'cb cb-' + (calIsSair(ev) ? 'sair' : ({ '練習': 'prac', '合宿': 'camp', '大会': 'comp' })[ev.type]); }
 
   function renderCalTab() {
     var tab = byId('tab-cal');
@@ -2917,6 +2919,7 @@
     tab.querySelector('.cal-prev').disabled = months.indexOf(S.calMonth) <= 0;
     tab.querySelector('.cal-next').disabled = months.indexOf(S.calMonth) >= months.length - 1;
     byId('calLegend').innerHTML = Object.keys(CAL_TYPES).map(function (t) { return '<span class="cl"><i class="' + calBarClass({ type: t }) + '"></i>' + CAL_TYPES[t] + '</span>'; }).join('') +
+      '<span class="cl"><i class="' + calBarClass({ type: '練習', venue: 'S-air' }) + '"></i>S-airの練習会</span>' +
       (S.family ? '<span class="cl"><span class="cm cm-yes">参</span>参加 <span class="cm cm-no">不</span>不参加 <span class="cm cm-un">未</span>未回答（自分の家族）</span>'
         : S.me.staffId ? '<span class="cl">自分の○△×・<b>担</b>＝自分の担当</span>' : '');
     if (S.calView === 'list') return renderCalList();
