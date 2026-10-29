@@ -513,7 +513,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261021b';
+  var APP_VERSION = '20261029a';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -2141,7 +2141,8 @@
       startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1], allDay: ev.allDay,
       startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', assign: assign, assignDays: assignDays, people: (ev.absentees || []).slice(),
       partial: ev.answers ? ev.answers.partial : undefined,
-      lodging: ev.lodging ? { on: true, lodgingId: ev.lodging.id, nights: ev.lodging.nights.slice(), deadline: ev.lodging.deadline || '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }) } : undefined
+      lodging: ev.lodging ? { on: true, lodgingId: ev.lodging.id, nights: ev.lodging.nights.slice(), deadline: ev.lodging.deadline || '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }),
+        unitPrice: ev.lodging.billing ? ev.lodging.billing.unitPrice : 3500, showFamily: !!(ev.lodging.billing && ev.lodging.billing.showFamily) } : undefined
     });
     if (!S.lodgings) loadLodgings(function () { if (S.plan.ed) renderPlanEditor(); });
   }
@@ -3528,7 +3529,9 @@
   // ★ 宿泊があるのはアプリの予定（計画タブ）の練習会・合宿・大会。予定カードに宿の情報と夜ごとの回答欄を出す
   // ★ 家族は自分の家族の選手の分、スタッフは自分の分を答える。管理者は夜ごとの集計（名前・食事）と「宿に伝える内容をコピー」
   // ★ ［泊まる］を選ぶと、宿に食事があれば食事を「要」にしておく（変えられる）。［宿泊の回答を保存］で保存。締切を過ぎたら見るだけ
-  // ★ 料金の計算・集金、カレンダーへの反映、Haiku君による入力の代行はしない
+  // ★ 集金・支払いの管理、カレンダーへの反映、Haiku君による入力の代行はしない
+  // ★ v40〜（城さん確定 2026-10-29）：家族は夜ごとに「大人◯人」も答える。管理者は家庭ごとの泊数（選手・大人）と預かり金（目安）＝泊数×仮の単価、
+  //   延べ泊数、スタッフの泊数（合計に入れない）、宿泊が未回答の家庭を見る。家族は「家族に表示」にした予定だけ、自分の家庭の金額（目安）を見る
   // ★ 未回答（城さん確定 2026-10-12）：管理者は夜ごとに名前、スタッフは人数だけ。宿に伝えるコピーには入れない
 
   var LG_STAYS = ['泊まる', '泊まらない', '未定'];
@@ -3570,9 +3573,9 @@
     if (l.deadline) h += '<div class="lg-info ' + (l.closed ? 'lg-closed' : 'lg-due') + '">' + (l.closed ? '回答の締切（' + lgDate(l.deadline) + '）を過ぎました。変えたいときは城さんに連絡してください' : '回答の締切：' + lgDate(l.deadline)) + '</div>';
     if (S.me.isAdmin) {
       if (l.memo) h += '<div class="lg-info lg-memo">宿のメモ（管理者だけ）：' + esc(l.memo) + '</div>';
-      h += lgSummaryHtml(l, true) + '<button type="button" class="mini" data-lg="copy" data-key="' + esc(ev.key) + '">宿に伝える内容をコピー</button>';
+      h += lgSummaryHtml(l, true) + '<button type="button" class="mini" data-lg="copy" data-key="' + esc(ev.key) + '">宿に伝える内容をコピー</button>' + lgBillingHtml(l.billing);
     } else if (S.family) {
-      h += S.myAthletes.map(function (id) { return lgForm(ev, id, nameOf(id)); }).join('');
+      h += S.myAthletes.map(function (id) { return lgForm(ev, id, nameOf(id)); }).join('') + lgAdultForm(ev) + lgFamilyBillHtml(l.billing);
     } else {
       h += lgSummaryHtml(l, false) + lgForm(ev, 'me', '自分');
     }
@@ -3583,6 +3586,7 @@
   function lgSummaryHtml(l, admin) {
     return '<ul class="lg-sum">' + l.summary.map(function (s) {
       var line = '<b>' + lgDate(s.night) + 'の夜</b>：泊' + (s.athletes + s.staff) + '名（選手' + s.athletes + '・スタッフ' + s.staff + '）' +
+        (s.adults ? '＋大人' + s.adults + '名' : '') +   // 家庭の大人（v40〜）
         (l.dinner ? '／夕食' + s.dinner : '') + (l.breakfast ? '／朝食' + s.breakfast : '');
       var names = s.stay.map(function (p) {
         var m = admin ? [p.dinner ? '夕' : '', p.breakfast ? '朝' : ''].filter(Boolean).join('') : '';
@@ -3640,6 +3644,12 @@
     if (!ev || !ev.lodging) return;
     if (act === 'copy') { lgCopy(ev); return; }
     if (S.lgBusy || ev.lodging.closed) return;
+    if (act === 'adult') {   // 家庭の大人の人数（v40〜）
+      lgAdultDraft(ev)[b.dataset.night] = +b.dataset.v;
+      lgRerender();
+      return;
+    }
+    if (act === 'save' && b.dataset.who === 'adults') { lgAdultSave(ev); return; }
     var who = b.dataset.who, dr = lgDraft(ev, who), n = b.dataset.night;
     if (act === 'stay') {
       var v = dr[n] = dr[n] || {};
@@ -3680,6 +3690,92 @@
     }).then(function () { S.lgBusy = false; lgRerender(); });
   }
 
+  // ---------------------------------------------------------------- 家庭の大人の人数と預かり金（目安）（v40〜）
+
+  var LG_ADULTS_MAX = 4;
+
+  function lgAdultDraft(ev) {
+    S.lgDraft = S.lgDraft || {};
+    var k = ev.key + '|adults';
+    if (!S.lgDraft[k]) S.lgDraft[k] = Object.assign({}, ev.lodging.mineAdults || {});
+    return S.lgDraft[k];
+  }
+  function lgAdultDirty(ev) {
+    var dr = S.lgDraft && S.lgDraft[ev.key + '|adults'];
+    if (!dr) return false;
+    var saved = ev.lodging.mineAdults || {};
+    return ev.lodging.nights.some(function (n) { return dr[n] !== saved[n]; });
+  }
+
+  /** 家族：夜ごとに、泊まる大人（保護者など）の人数（0〜4人） */
+  function lgAdultForm(ev) {
+    var l = ev.lodging;
+    if (!l.mineAdults) return '';   // サーバーがまだ古い版
+    var dr = lgAdultDraft(ev), dirty = lgAdultDirty(ev);
+    var dis = l.closed || S.lgBusy ? ' disabled' : '';
+    var attrs = ' data-key="' + esc(ev.key) + '" data-who="adults"';
+    var h = '<div class="lg-form lg-adults' + (dirty ? ' dirty' : '') + '"' + attrs + '><div class="lg-who">大人（保護者など）の宿泊</div>' +
+      '<p class="hint">一緒に泊まる大人の人数を夜ごとに選んでください。泊まらない夜は「0」です。</p>';
+    l.nights.forEach(function (n) {
+      var v = dr.hasOwnProperty(n) ? dr[n] : null;
+      h += '<div class="lg-night"><span class="lg-date">' + lgDate(n) + 'の夜</span><span class="lg-btns lg-cnt">';
+      for (var c = 0; c <= LG_ADULTS_MAX; c++) {
+        h += '<button type="button" class="lg-btn' + (v === c ? ' on' : '') + '" data-lg="adult" data-night="' + n + '" data-v="' + c + '" aria-pressed="' + (v === c) + '"' + attrs + dis + '>' + c + '人</button>';
+      }
+      h += '</span></div>';
+    });
+    if (!l.closed) {
+      h += '<p class="lg-unsaved" role="status"' + (dirty ? '' : ' hidden') + '>まだ保存していません。［大人の人数を保存］を押してください</p>' +
+        '<button type="button" class="lg-save" data-lg="save"' + attrs + dis + '>大人の人数を保存</button>';
+    }
+    return h + '</div>';
+  }
+
+  function lgAdultSave(ev) {
+    var dr = lgAdultDraft(ev);
+    var adults = ev.lodging.nights.filter(function (n) { return dr.hasOwnProperty(n); }).map(function (n) { return { night: n, count: dr[n] }; });
+    if (!adults.length) { lgMsg('ng', '⚠ 夜ごとに大人の人数（泊まらない夜は0人）を選んでください'); return; }
+    var month = ev.dates.filter(inPeriod)[0].slice(0, 7);
+    S.lgBusy = true;
+    lgMsg('busy', '保存中…');
+    api('lodgingAnswer', { month: month, eventKey: ev.key, adults: adults }).then(function (r) {
+      S.upcoming = { status: 'ok', data: r };
+      delete S.lgDraft[ev.key + '|adults'];
+      lgMsg('ok', '✓ ' + ev.title + '：大人の人数を保存しました');
+    }, function (e) {
+      lgMsg('ng', '⚠ 保存できませんでした：' + (/不明な操作|使えません/.test(e.message) && e.code !== 'bad_request' ? 'サーバー側（Apps Script）がまだ古い版です' : e.message));
+    }).then(function () { S.lgBusy = false; lgRerender(); });
+  }
+
+  function yen(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '円'; }
+
+  /** 家族：自分の家庭の預かり金（目安）。管理者が「家族に表示」にした予定だけ */
+  function lgFamilyBillHtml(b) {
+    if (!b) return '';
+    var parts2 = ['選手' + b.athleteNights + '泊'];
+    if (b.includeAdults) parts2.push('大人' + b.adultNights + '泊');
+    return '<div class="lg-bill-fam" role="note"><b>預かり金（目安）：' + yen(b.deposit) + '</b>' +
+      '<div>' + parts2.join('＋') + '＝' + b.nights + '泊 × ' + yen(b.unitPrice) + (b.maybeNights ? '（未定の' + b.maybeNights + '泊は入っていません）' : '') + '</div>' +
+      '<div class="hint">拠点の費用は、シーズン後に実際の延べ泊数で割って精算します。この金額は前もってお預かりする目安です。</div></div>';
+  }
+
+  /** 管理者：家庭ごとの泊数と預かり金（目安）・延べ泊数・スタッフの泊数・未回答の家庭 */
+  function lgBillingHtml(b) {
+    if (!b) return '';
+    var h = '<div class="lg-bill"><h5>泊数と預かり金（目安）</h5>' +
+      '<div class="lg-info">仮の単価 ' + yen(b.unitPrice) + '／大人の泊数を' + (b.includeAdults ? '含める' : '含めない') + '（「管理」タブで変更）／家族への表示：' + (b.showFamily ? '<b>する</b>' : 'しない（管理者だけ）') + '</div>';
+    h += '<div class="lg-bill-wrap"><table class="lg-bill-t"><thead><tr><th>家庭</th><th>選手</th><th>大人</th><th>未定</th><th>泊数</th><th>預かり金</th></tr></thead><tbody>' +
+      (b.families.length ? b.families.map(function (f) {
+        return '<tr><td>' + esc(f.name) + '</td><td>' + f.athleteNights + '</td><td>' + f.adultNights + '</td><td>' + (f.maybeNights || '') + '</td><td><b>' + f.nights + '</b></td><td>' + yen(f.deposit) + '</td></tr>';
+      }).join('') : '<tr><td colspan="6" class="muted">まだ回答がありません</td></tr>') +
+      '</tbody><tfoot><tr><th>合計</th><th>' + b.totals.athleteNights + '</th><th>' + b.totals.adultNights + '</th><th>' + (b.totals.maybeNights || '') + '</th><th>' + b.totals.nights + '</th><th>' + yen(b.totals.deposit) + '</th></tr></tfoot></table></div>';
+    h += '<div class="lg-info">延べ泊数：<b>' + b.totals.nights + '泊</b>（選手' + b.totals.athleteNights + (b.includeAdults ? '＋大人' + b.totals.adultNights : '・大人は含めない') + '）。未定は数えていません。</div>' +
+      '<div class="lg-info">スタッフの泊数：' + b.staffNights + '泊（延べ泊数・預かり金には含めません）</div>' +
+      '<div class="lg-info lg-unans">宿泊が未回答の家庭：' + (b.unanswered.length ? b.unanswered.map(function (f) { return esc(f.name); }).join('・') : 'なし') + '</div>' +
+      '<p class="hint">アプリは金額を表示するだけです（集金・支払いの管理はしません）。</p></div>';
+    return h;
+  }
+
   function lgMsg(kind, text) {
     if (S.family) S.ansMsg = { kind: kind, text: text };
     else S.evMsg = { kind: kind, text: text };
@@ -3692,6 +3788,7 @@
     var lines = ['【' + ev.title + '】' + l.name];
     l.summary.forEach(function (s) {
       lines.push(lgDate(s.night) + '泊：' + (s.athletes + s.staff) + '名（選手' + s.athletes + '・スタッフ' + s.staff + '）' +
+        (s.adults ? '＋大人' + s.adults + '名（大人の食事は別に確認）' : '') +
         (l.dinner ? '　夕食' + s.dinner + '名' : '') + (l.breakfast ? '　翌朝食' + s.breakfast + '名' : ''));
       if (s.stay.length) lines.push('　' + s.stay.map(function (p) {
         var m = [l.dinner ? (p.dinner ? '夕○' : '夕×') : '', l.breakfast ? (p.breakfast ? '朝○' : '朝×') : ''].filter(Boolean).join('');
@@ -3741,6 +3838,19 @@
     });
     byId('lgAdmin').addEventListener('input', lgAdminInput);
     byId('lgAdmin').addEventListener('change', lgAdminInput);
+    byId('lgAdmin').addEventListener('change', function (e) {
+      if (!e.target.dataset || e.target.dataset.lgs !== 'adults' || S.lgaBusy) return;
+      var on = e.target.checked;
+      S.lgaBusy = true;
+      S.lgaMsg = { kind: 'busy', text: '保存中…' };
+      renderLodgingAdmin();
+      api('setLodgingCountAdults', { include: on }).then(function (r) {
+        S.lgIncludeAdults = r.includeAdults;
+        S.lgaMsg = { kind: 'ok', text: '✓ 大人の泊数を' + (r.includeAdults ? '含める' : '含めない') + 'にしました（予定と担当の集計に反映されます）' };
+        Object.keys(S.events).forEach(function (m) { delete S.events[m]; });   // 集計を読み直す
+      }, function (er) { S.lgaMsg = { kind: 'ng', text: '⚠ 保存できませんでした：' + er.message }; })
+        .then(function () { S.lgaBusy = false; renderLodgingAdmin(); });
+    });
   }
 
   function lgAdminInput(e) {
@@ -3751,7 +3861,7 @@
 
   function loadLodgings(then) {
     if (!S.me || !S.me.isAdmin) return;
-    api('lodgingList').then(function (r) { S.lodgings = r.lodgings; S.lgaMsg = null; }, function (e) {
+    api('lodgingList').then(function (r) { S.lodgings = r.lodgings; S.lgIncludeAdults = r.includeAdults; S.lgaMsg = null; }, function (e) {
       S.lgaMsg = { kind: 'ng', text: '⚠ 宿を読み込めませんでした：' + (/不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message) };
     }).then(function () { renderLodgingAdmin(); if (then) then(); });
   }
@@ -3773,8 +3883,12 @@
     var box = byId('lgAdmin');
     if (!box || !S.me || !S.me.isAdmin) return;
     var f = S.lgForm || LG_EMPTY, dis = S.lgaBusy ? ' disabled' : '';
-    var h = '<h3>宿（宿泊の出欠）</h3><p class="hint">白馬の拠点などをここで登録しておくと、計画タブの予定の編集や「予定と担当」の［宿泊を設定］で選べます。大会の宿は予定の編集から新しく登録することもできます（ここにも残ります）。料金の計算はしません。</p>';
+    var h = '<h3>宿（宿泊の出欠）</h3><p class="hint">白馬の拠点などをここで登録しておくと、計画タブの予定の編集や「予定と担当」の［宿泊を設定］で選べます。大会の宿は予定の編集から新しく登録することもできます（ここにも残ります）。</p>';
     if (S.lgaMsg) h += '<p class="ev-status ' + S.lgaMsg.kind + '">' + esc(S.lgaMsg.text) + '</p>';
+    if (typeof S.lgIncludeAdults === 'boolean') {   // 延べ泊数・預かり金（目安）に大人を含めるか（v40〜）
+      h += '<label class="chk lga-adults"><input type="checkbox" data-lgs="adults"' + (S.lgIncludeAdults ? ' checked' : '') + dis + '> 大人（保護者など）の泊数を、延べ泊数と預かり金（目安）に含める</label>' +
+        '<p class="hint">スタッフの泊数は含めません。仮の単価と家族への表示は、予定ごとに［宿泊を設定］で決めます。</p>';
+    }
     h += '<ul class="staff-list lga-list">' + (S.lodgings || []).map(function (l) {
       return '<li class="' + (l.active ? '' : 'off') + '"><span class="nm">' + esc(l.name) + ' <small>（' + esc(l.kind) + (l.dinner ? '・夕食あり' : '') + (l.breakfast ? '・朝食あり' : '') + (l.active ? '' : '・無効') + '）</small></span>' +
         '<button type="button" class="mini" data-lga="edit" data-id="' + esc(l.id) + '"' + dis + '>直す</button>' +
@@ -3829,7 +3943,11 @@
     h += '<fieldset class="lg-nights"><legend>泊まる夜</legend>' + range.map(function (n, i) {
       return '<label><input type="checkbox" data-lgp="night" value="' + n + '"' + (lg.nights.indexOf(n) >= 0 ? ' checked' : '') + '> ' + lgDate(n) + 'の夜' + (i === 0 ? '（前泊）' : '') + '</label>';
     }).join('') + '</fieldset>' +
-      '<label class="lg-dl">回答の締切 <input type="date" data-lgp="deadline" value="' + esc(lg.deadline || '') + '"></label>';
+      '<label class="lg-dl">回答の締切 <input type="date" data-lgp="deadline" value="' + esc(lg.deadline || '') + '"></label>' +
+      // 預かり金（目安）（v40〜）
+      '<label class="lg-dl">仮の単価（1泊・円） <input type="number" inputmode="numeric" min="0" max="100000" step="1" data-lgp="unitPrice" value="' + esc(lg.unitPrice == null ? 3500 : lg.unitPrice) + '"></label>' +
+      '<label class="chk"><input type="checkbox" data-lgp="showFamily"' + (lg.showFamily ? ' checked' : '') + '> 家族用URLに預かり金（目安）を表示する</label>' +
+      '<p class="hint">表示しないあいだは、金額は管理者だけが見られます。</p>';
     return h;
   }
 
@@ -3842,7 +3960,7 @@
     var f = t.dataset.lgp;
     if (t.dataset.lgn) { ed.lodging.newL[t.dataset.lgn] = t.type === 'checkbox' ? t.checked : t.value; return true; }
     if (!f) return false;
-    var lg = ed.lodging = ed.lodging || { on: false, lodgingId: '', nights: [], deadline: '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }) };
+    var lg = ed.lodging = ed.lodging || { on: false, lodgingId: '', nights: [], deadline: '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }), unitPrice: 3500, showFamily: false };
     if (f === 'on') {
       lg.on = t.checked;
       if (lg.on && !lg.nights.length) lg.nights = lgDefaultNights(ed);
@@ -3854,6 +3972,8 @@
       if (t.checked && i < 0) lg.nights.push(t.value); else if (!t.checked && i >= 0) lg.nights.splice(i, 1);
       lg.nights.sort();
     } else if (f === 'deadline') lg.deadline = t.value;
+    else if (f === 'unitPrice') lg.unitPrice = t.value;
+    else if (f === 'showFamily') lg.showFamily = t.checked;
     return true;
   }
 
@@ -3864,7 +3984,7 @@
     if (!lg.on) return null;
     if (!lg.lodgingId) throw new Error('宿を選んでください（無ければ「新しい宿を登録」）');
     if (!lg.nights.length) throw new Error('泊まる夜を1つ以上選んでください');
-    var out = { nights: lg.nights.slice(), deadline: lg.deadline || '' };
+    var out = { nights: lg.nights.slice(), deadline: lg.deadline || '', unitPrice: lg.unitPrice == null || lg.unitPrice === '' ? 3500 : lg.unitPrice, showFamily: !!lg.showFamily };
     if (lg.lodgingId === '__new') {
       if (!String(lg.newL.name || '').trim()) throw new Error('新しい宿の名前を入れてください');
       out.newLodging = lg.newL;
@@ -3897,7 +4017,8 @@
     if (!ev) return;
     var l = ev.lodging;
     S.evLg = { key: key, type: ev.type, startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1] };
-    S.evLg.lodging = { on: true, lodgingId: l ? l.id : '', nights: l ? l.nights.slice() : [], deadline: l ? l.deadline || '' : '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }) };
+    S.evLg.lodging = { on: true, lodgingId: l ? l.id : '', nights: l ? l.nights.slice() : [], deadline: l ? l.deadline || '' : '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }),
+      unitPrice: l && l.billing ? l.billing.unitPrice : 3500, showFamily: !!(l && l.billing && l.billing.showFamily) };
     if (!S.evLg.lodging.nights.length) S.evLg.lodging.nights = lgDefaultNights(S.evLg);
     if (!S.lodgings) loadLodgings(renderEvents);
     renderEvents();
