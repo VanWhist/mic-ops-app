@@ -740,3 +740,15 @@ button.btn-busy { opacity: .6; cursor: progress; pointer-events: none; }
 .day .sv { position: absolute; top: 2px; right: 4px; font-size: 11px; font-weight: 700; line-height: 1; }
 .day.pending .sv { color: var(--accent); }
 .day.saved-now .sv { color: var(--o); }
+/* 泊数と預かり金（目安）（v40〜） */
+.lg-bill { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.lg-bill h5 { margin: 0 0 4px; font-size: 14px; }
+.lg-bill-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 6px 0; }
+.lg-bill-t { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+.lg-bill-t th, .lg-bill-t td { border: 1px solid var(--line); padding: 4px 6px; text-align: right; white-space: nowrap; }
+.lg-bill-t th:first-child, .lg-bill-t td:first-child { text-align: left; }
+.lg-bill-t thead th, .lg-bill-t tfoot th { background: #f3f6fb; }
+.lg-cnt .lg-btn { min-width: 44px; padding-left: 6px; padding-right: 6px; }
+.lg-bill-fam { margin: 8px 0; padding: 8px 10px; border: 1px solid #f1d49a; background: #fffaf0; border-radius: 8px; font-size: 14px; }
+.lg-bill-fam .hint { margin: 4px 0 0; }
+.lga-adults { display: block; margin: 8px 0 2px; }
