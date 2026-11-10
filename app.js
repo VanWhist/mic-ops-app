@@ -514,7 +514,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261110a';
+  var APP_VERSION = '20261110b';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -2179,6 +2179,9 @@
       planDuplicate();
     } else if (act === 'bulk') {
       openPlanBulk();
+    } else if (act === 'dup-bulk') {
+      if (p.busy) return;
+      planDupToBulk();
     } else if (act === 'back') {
       if (p.busy) return;
       p.ed = null; renderPlan();
@@ -2316,6 +2319,8 @@
         '<button type="button" class="secondary" data-pa="save" data-status="中止"' + dis + '>中止のまま保存</button>';
     }
     h += '</div>';
+    if (ed.dup) h += '<div class="pl-dup"><button type="button" class="secondary" data-pa="dup-bulk"' + dis + '>まとめて登録で複製（何日分も作る）</button>' +
+      '<span class="hint">この中身（種類・名前・会場・時刻・担当・メモ）で、まとめて登録の画面を開きます（宿泊と参加の受付はコピーしません）</span></div>';
     if (!isNew) h += '<div class="pl-dup"><button type="button" class="secondary" data-pa="dup"' + dis + '>この予定を複製</button>' +
       '<span class="hint">種類・名前・会場・時刻・担当・メモをコピーして、新しい予定を作ります（日付は選び直し。宿泊と参加の受付はコピーしません）</span></div>';
     h += '<p class="hint">下書きは管理者だけに見えます（カレンダーに反映せず、家族にも出ません）。確定すると「予定と担当」で参加の受付・カレンダー反映ができます。</p>';
@@ -2330,9 +2335,11 @@
   // ★ まとめて登録：期間と曜日で日を出し、カレンダーで足し外し。1日ずつ別の予定として「下書き」で作る（1回50件まで）
   //   祝日・同じ名前の予定がある日は印を付ける。同じ名前の予定がある日は最初は外しておく（選べば作る）
   // ★ どちらも MICスケジュールには書かない（アプリの予定だけ）
+  // ★ v42〜（城さん決定 2026-11-10）：「不在」もまとめて作れる（不在の人もまとめて）。担当（不在なら不在の人）は日ごとに変えられる
+  //   （最初は共通の担当を全日に入れ、一覧の［この日を変える］でその日だけ直す）。複製の画面から［まとめて登録で複製］
 
   var BULK_MAX = 50;
-  var BULK_TYPES = PLAN_TYPES.filter(function (t) { return t[0] !== '不在'; });
+  var BULK_TYPES = PLAN_TYPES;   // v42〜：不在（自主練など）もまとめて作れる
 
   function planDuplicate() {
     var src = S.plan.ed;
@@ -2348,18 +2355,79 @@
     renderPlan();
   }
 
-  function openPlanBulk() {
+  function openPlanBulk(seed) {
     var p = S.plan;
     var from = p.start && inPeriodDate(p.start) ? p.start : (S.month + '-01' >= S.period.start + '-01' ? S.month + '-01' : S.period.start + '-01');
     var to = p.end && p.end > from ? p.end : daysOf(from.slice(0, 7)).slice(-1)[0];
     if (!inPeriod(to)) to = periodLastDay();
     p.bulk = {
       opId: newOpId(), from: from, to: to, wds: [], add: [], drop: [], pick: {}, confirm: false, calMonth: from.slice(0, 7),
-      type: '練習', name: '', venue: '', allDay: true, startTime: '', endTime: '', memo: '', assign: {}
+      type: '練習', name: '', venue: '', allDay: true, startTime: '', endTime: '', memo: '', assign: {}, people: [],
+      dayAssign: {}, dayPeople: {}, openDay: null   // 日ごとの担当・不在の人（v42〜。無い日は共通のまま）
     };
+    if (seed) Object.keys(seed).forEach(function (k) { p.bulk[k] = seed[k]; });
+    p.ed = null;
     p.msg = null;
     renderPlan();
     window.scrollTo(0, 0);
+  }
+
+  /** 複製の画面から、コピーした中身でまとめて登録を開く（v42〜）。宿泊・参加の受付はコピーしない */
+  function planDupToBulk() {
+    var ed = S.plan.ed;
+    if (!ed) return;
+    var roles = ROLES_BY_TYPE[ed.type] || [], assign = {};
+    Object.keys(ed.assign || {}).forEach(function (k) { var r = (ed.assign[k] || []).filter(function (x) { return roles.indexOf(x) >= 0; }); if (r.length) assign[k] = r; });
+    var nm = ed.name;
+    openPlanBulk({
+      type: ed.type, name: ed.name || '', venue: ed.venue || '', allDay: !!ed.allDay, startTime: ed.allDay ? '' : (ed.startTime || ''), endTime: ed.allDay ? '' : (ed.endTime || ''),
+      memo: ed.memo || '', assign: assign, people: ed.type === '不在' ? (ed.people || []).slice() : []
+    });
+    S.plan.msg = { kind: 'ok', text: '「' + nm + '」の中身でまとめて登録を開きました。日を選んでください（まだ作っていません）' };
+    renderPlan();
+  }
+
+  // ---- 日ごとの担当（v42〜）
+  function bulkRoles(bk) { return ROLES_BY_TYPE[bk.type] || []; }
+  /** その日の担当 { staffId: [役割] }（直していない日は共通） */
+  function bulkDayAssign(bk, d) { return bk.dayAssign[d] || bk.assign; }
+  function bulkDayPeople(bk, d) { return bk.dayPeople[d] || bk.people; }
+  function bulkDayChanged(bk, d) { return bk.type === '不在' ? !!bk.dayPeople[d] : !!bk.dayAssign[d]; }
+  /** その日の担当の文字（「笠巻（コーチ）・和田（引率）」・不在なら不在の人） */
+  function bulkDayText(bk, d) {
+    if (bk.type === '不在') {
+      var ps = bulkDayPeople(bk, d);
+      return '不在：' + (ps.length ? S.staff.filter(function (st) { return ps.indexOf(st.staffId) >= 0; }).map(function (st) { return st.name; }).join('・') : 'なし');
+    }
+    var a = bulkDayAssign(bk, d), roles = bulkRoles(bk), out = [];
+    S.staff.forEach(function (st) { (a[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) out.push(st.name + '（' + ROLE_SHORT[r] + '）'); }); });
+    return '担当：' + (out.length ? out.join('・') : '未定');
+  }
+  function copyAssign(a) { var o = {}; Object.keys(a).forEach(function (k) { o[k] = (a[k] || []).slice(); }); return o; }
+  /** 一覧の1行の下：その日の担当と［この日を変える］。開いた日は、その日の○△×と役割のボタン（不在なら人のチェック） */
+  function bulkDayHtml(bk, d, dis) {
+    var changed = bulkDayChanged(bk, d), open = bk.openDay === d;
+    var h = '<div class="pb-asg' + (changed ? ' changed' : '') + '"><span>' + esc(bulkDayText(bk, d)) + (changed ? ' <small class="badge draft">この日だけ</small>' : '') + '</span>' +
+      '<button type="button" class="mini" data-pb="dayedit" data-day="' + d + '" aria-expanded="' + open + '"' + dis + '>' + (open ? '閉じる' : 'この日を変える') + '</button></div>';
+    if (!open) return h;
+    h += '<div class="pb-dayed">';
+    if (bk.type === '不在') {
+      var ps = bulkDayPeople(bk, d);
+      h += S.staff.map(function (st) {
+        return '<label><input type="checkbox" data-pb="dperson" data-day="' + d + '" value="' + esc(st.staffId) + '"' + (ps.indexOf(st.staffId) >= 0 ? ' checked' : '') + '> ' + esc(st.name) + '</label>';
+      }).join('');
+    } else {
+      var a = bulkDayAssign(bk, d), roles = bulkRoles(bk);
+      h += '<ul class="pb-day-cands">' + staffCands([d]).map(function (x) {
+        var v = staffVal(x.st.staffId, d).s || '';
+        return '<li><span class="nm">' + esc(x.st.name) + '</span><span class="sym ' + (STATUS_CLASS[v] || '') + '">' + (esc(v) || '未') + '</span><span class="rb">' + roles.map(function (role) {
+          var on = (a[x.st.staffId] || []).indexOf(role) >= 0;
+          return '<button type="button" class="role-btn' + (on ? ' on' : '') + '" data-pb="drole" data-day="' + d + '" data-staff="' + esc(x.st.staffId) + '" data-role="' + role + '" aria-pressed="' + on + '">' + (on ? '✓' : '') + ROLE_SHORT[role] + '</button>';
+        }).join('') + '</span></li>';
+      }).join('') + '</ul>';
+    }
+    if (changed) h += '<button type="button" class="link-btn" data-pb="dreset" data-day="' + d + '">共通の' + (bk.type === '不在' ? '不在の人' : '担当') + 'に戻す</button>';
+    return h + '</div>';
   }
 
   /** 期間と曜日で出る日 → 足した日・外した日。期間の中・並べる */
@@ -2398,7 +2466,8 @@
         '<p>' + esc(bk.name) + '（' + esc((BULK_TYPES.filter(function (t) { return t[0] === bk.type; })[0] || ['', ''])[1]) + (bk.venue ? '・' + esc(bk.venue) : '') + '・' +
         (bk.allDay ? '終日' : esc(bk.startTime + '–' + bk.endTime)) + '）をすべて「下書き」で作ります。</p>' +
         '<ol class="pb-confirm-list">' + chosen.map(function (d) {
-          return '<li>' + esc(longDate(d)) + (bulkSame(bk, d) ? ' <span class="badge tent">同じ名前の予定あり</span>' : '') + '</li>';
+          return '<li>' + esc(longDate(d)) + (bulkSame(bk, d) ? ' <span class="badge tent">同じ名前の予定あり</span>' : '') +
+            '<div class="pb-asg' + (bulkDayChanged(bk, d) ? ' changed' : '') + '">' + esc(bulkDayText(bk, d)) + '</div></li>';
         }).join('') + '</ol>' +
         '<div class="pl-acts"><button type="button" class="primary" data-pb="create"' + dis + '>' + chosen.length + '件作る</button>' +
         '<button type="button" class="secondary" data-pb="unconfirm"' + dis + '>戻って直す</button></div>' +
@@ -2406,8 +2475,40 @@
       byId('plEditor').innerHTML = h;
       return;
     }
-    // 1. 日を選ぶ
-    h += '<h3 class="pl-h">1. 日を選ぶ</h3><div class="pl-dates">' +
+    // 1. 中身（v42〜：中身 → 共通の担当 → 日の順。日の一覧に日ごとの担当を出すため）
+    h += '<h3 class="pl-h">1. 予定の中身（全部の日で同じ）</h3><div class="pl-form">' +
+      '<label>種類 <select data-pb="type">' + BULK_TYPES.map(function (t) { return '<option value="' + t[0] + '"' + (bk.type === t[0] ? ' selected' : '') + '>' + t[1] + '</option>'; }).join('') + '</select></label>' +
+      '<label>名前 <input type="text" data-pb="name" maxlength="40" value="' + esc(bk.name) + '" placeholder="' + (bk.type === '不在' ? '例：自主練' : '例：O-air 練習会') + '"></label>' +
+      '<label>会場 <select data-pb="venue"><option value="">なし（会場で絞らない）</option>' + S.venues.map(function (v) { return '<option' + (bk.venue === v ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join('') + '</select></label>' +
+      '<label class="chk"><input type="checkbox" data-pb="allDay"' + (bk.allDay ? ' checked' : '') + '> 終日</label>' +
+      (bk.allDay ? '' : '<div class="pl-dates"><label>開始時刻 <input type="time" step="300" data-pb="startTime" value="' + esc(bk.startTime) + '"></label>' +
+        '<label>終了時刻 <input type="time" step="300" data-pb="endTime" value="' + esc(bk.endTime) + '"></label></div>') +
+      '<label>スタッフ向けメモ <textarea data-pb="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(bk.memo) + '</textarea></label></div>';
+    // 2. 共通の担当（不在なら不在の人）
+    if (bk.type === '不在') {
+      h += '<h3 class="pl-h">2. 不在の人（全部の日の共通）</h3><p class="hint">日ごとに変えるときは、下の日の一覧の［この日を変える］から。</p>' +
+        '<div class="pl-people">' + S.staff.map(function (st) {
+          return '<label><input type="checkbox" data-pb="person" value="' + esc(st.staffId) + '"' + (bk.people.indexOf(st.staffId) >= 0 ? ' checked' : '') + '> ' + esc(st.name) + '</label>';
+        }).join('') + '</div>';
+    } else {
+      var roles = bulkRoles(bk);
+      var cands = staffCands(chosen);
+      var names = [];
+      S.staff.forEach(function (st) { (bk.assign[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) names.push(esc(st.name) + '（' + ROLE_SHORT[r] + '）'); }); });
+      h += '<h3 class="pl-h">2. 担当（全部の日の共通） <small class="muted">' + (names.length ? names.join('・') : '未定') + '</small></h3>' +
+        '<p class="hint">ここで選んだ担当が全部の日に入ります。日ごとに変えるときは、下の日の一覧の［この日を変える］から。○の数は選んだ日の分です。</p>' +
+        '<ul class="pl-cands">' + cands.map(function (x) {
+          var c = x.c;
+          return '<li class="k-' + c.cat + '"><span class="nm">' + esc(x.st.name) + '</span>' +
+            '<span class="av">' + (c.days ? '○ ' + c.o + '/' + c.days + '日' + (c.t ? '・△' + c.t : '') + (c.x ? '・×' + c.x : '') : '—') + '</span>' +
+            '<span class="rb">' + roles.map(function (role) {
+              var on = (bk.assign[x.st.staffId] || []).indexOf(role) >= 0;
+              return '<button type="button" class="role-btn' + (on ? ' on' : '') + '" data-pb="role" data-staff="' + esc(x.st.staffId) + '" data-role="' + role + '" aria-pressed="' + on + '">' + (on ? '✓' : '') + ROLE_SHORT[role] + '</button>';
+            }).join('') + '</span></li>';
+        }).join('') + '</ul>';
+    }
+    // 3. 日を選ぶ・日ごとの担当
+    h += '<h3 class="pl-h">3. 日を選ぶ・日ごとの' + (bk.type === '不在' ? '不在の人' : '担当') + '</h3><div class="pl-dates">' +
       '<label>期間のはじめ <input type="date" data-pb="from" value="' + esc(bk.from) + '" min="' + lim.min + '" max="' + lim.max + '"></label>' +
       '<label>期間のおわり <input type="date" data-pb="to" value="' + esc(bk.to) + '" min="' + lim.min + '" max="' + lim.max + '"></label></div>' +
       '<fieldset class="pb-wds"><legend>曜日</legend>' + WD.map(function (w, i) {
@@ -2415,31 +2516,6 @@
       }).join('') + '</fieldset>';
     h += '<div id="pbCal">' + bulkCalHtml(bk) + '</div>';
     h += '<div id="pbDates">' + bulkDatesHtml(bk) + '</div>';
-    // 2. 中身
-    h += '<h3 class="pl-h">2. 予定の中身（全部の日で同じ）</h3><div class="pl-form">' +
-      '<label>種類 <select data-pb="type">' + BULK_TYPES.map(function (t) { return '<option value="' + t[0] + '"' + (bk.type === t[0] ? ' selected' : '') + '>' + t[1] + '</option>'; }).join('') + '</select></label>' +
-      '<label>名前 <input type="text" data-pb="name" maxlength="40" value="' + esc(bk.name) + '" placeholder="例：O-air 練習会"></label>' +
-      '<label>会場 <select data-pb="venue"><option value="">なし（会場で絞らない）</option>' + S.venues.map(function (v) { return '<option' + (bk.venue === v ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join('') + '</select></label>' +
-      '<label class="chk"><input type="checkbox" data-pb="allDay"' + (bk.allDay ? ' checked' : '') + '> 終日</label>' +
-      (bk.allDay ? '' : '<div class="pl-dates"><label>開始時刻 <input type="time" step="300" data-pb="startTime" value="' + esc(bk.startTime) + '"></label>' +
-        '<label>終了時刻 <input type="time" step="300" data-pb="endTime" value="' + esc(bk.endTime) + '"></label></div>') +
-      '<label>スタッフ向けメモ <textarea data-pb="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(bk.memo) + '</textarea></label></div>';
-    // 3. 担当
-    var roles = ROLES_BY_TYPE[bk.type] || [];
-    var cands = staffCands(chosen);
-    var names = [];
-    S.staff.forEach(function (st) { (bk.assign[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) names.push(esc(st.name) + '（' + ROLE_SHORT[r] + '）'); }); });
-    h += '<h3 class="pl-h">3. 担当 <small class="muted">' + (names.length ? names.join('・') : '未定') + '</small></h3>' +
-      '<p class="hint">全部の日に同じ担当が付きます（日ごとに変えるときは、作ったあとで1件ずつ直してください）。○の数は選んだ日の分です。</p>' +
-      '<ul class="pl-cands">' + cands.map(function (x) {
-        var c = x.c;
-        return '<li class="k-' + c.cat + '"><span class="nm">' + esc(x.st.name) + '</span>' +
-          '<span class="av">' + (c.days ? '○ ' + c.o + '/' + c.days + '日' + (c.t ? '・△' + c.t : '') + (c.x ? '・×' + c.x : '') : '—') + '</span>' +
-          '<span class="rb">' + roles.map(function (role) {
-            var on = (bk.assign[x.st.staffId] || []).indexOf(role) >= 0;
-            return '<button type="button" class="role-btn' + (on ? ' on' : '') + '" data-pb="role" data-staff="' + esc(x.st.staffId) + '" data-role="' + role + '" aria-pressed="' + on + '">' + (on ? '✓' : '') + ROLE_SHORT[role] + '</button>';
-          }).join('') + '</span></li>';
-      }).join('') + '</ul>';
     h += '<div class="pl-acts"><button type="button" class="primary" data-pb="confirm"' + dis + '>まとめて作る（' + chosen.length + '件）</button></div>' +
       '<p class="hint">作る前に日付の一覧で確かめます。作った予定は「下書き」です（管理者だけに見え、カレンダーに反映しません）。</p>';
     byId('plEditor').innerHTML = h;
@@ -2476,7 +2552,8 @@
       var same = bulkSame(bk, d), on = bulkOn(bk, d);
       return '<li class="' + (on ? '' : 'off') + '"><label><input type="checkbox" data-pb="pick" value="' + d + '"' + (on ? ' checked' : '') + '> ' + esc(longDate(d)) + '</label>' +
         (HOLIDAYS[d] ? ' <span class="badge hol">祝日：' + esc(HOLIDAYS[d]) + '</span>' : '') +
-        (same ? ' <span class="badge tent">同じ名前の予定あり（' + esc(same.cal === 'アプリ' ? 'アプリ' + (same.appStatus ? '・' + same.appStatus : '') : same.cal === 'レッスン' ? 'MICレッスン' : 'MICスケジュール') + '）</span>' : '') + '</li>';
+        (same ? ' <span class="badge tent">同じ名前の予定あり（' + esc(same.cal === 'アプリ' ? 'アプリ' + (same.appStatus ? '・' + same.appStatus : '') : same.cal === 'レッスン' ? 'MICレッスン' : 'MICスケジュール') + '）</span>' : '') +
+        (on ? bulkDayHtml(bk, d, S.plan.busy ? ' disabled' : '') : '') + '</li>';
     }).join('') + '</ul>';
     return h;
   }
@@ -2513,6 +2590,16 @@
       if (j >= 0) cur.splice(j, 1); else cur.push(b.dataset.role);
       renderPlan(); return;
     }
+    // 日ごとの担当（v42〜）
+    if (act === 'dayedit') { bk.openDay = bk.openDay === b.dataset.day ? null : b.dataset.day; renderBulkDates(); return; }
+    if (act === 'drole') {
+      var dd = b.dataset.day;
+      if (!bk.dayAssign[dd]) bk.dayAssign[dd] = copyAssign(bk.assign);   // 直すときは共通の担当から
+      var dc = bk.dayAssign[dd][b.dataset.staff] = bk.dayAssign[dd][b.dataset.staff] || [], dj = dc.indexOf(b.dataset.role);
+      if (dj >= 0) dc.splice(dj, 1); else dc.push(b.dataset.role);
+      renderBulkDates(); return;
+    }
+    if (act === 'dreset') { delete bk.dayAssign[b.dataset.day]; delete bk.dayPeople[b.dataset.day]; renderBulkDates(); return; }
     if (act === 'confirm') {
       var err = bulkCheck(bk);
       if (err) { p.msg = { kind: 'ng', text: '⚠ ' + err }; renderPlan(); return; }
@@ -2545,6 +2632,15 @@
       var w = +t.value, i = bk.wds.indexOf(w);
       if (t.checked && i < 0) bk.wds.push(w); else if (!t.checked && i >= 0) bk.wds.splice(i, 1);
     } else if (f === 'pick') { bk.pick[t.value] = t.checked; }
+    else if (f === 'person') {
+      var pi = bk.people.indexOf(t.value);
+      if (t.checked && pi < 0) bk.people.push(t.value); else if (!t.checked && pi >= 0) bk.people.splice(pi, 1);
+      renderBulkDates(); return;
+    } else if (f === 'dperson') {
+      var dd = t.dataset.day, ps = bk.dayPeople[dd] = bk.dayPeople[dd] || bk.people.slice(), di = ps.indexOf(t.value);
+      if (t.checked && di < 0) ps.push(t.value); else if (!t.checked && di >= 0) ps.splice(di, 1);
+      renderBulkDates(); return;
+    }
     else if (f === 'allDay') bk.allDay = t.checked;
     else if (f === 'name' || f === 'memo') {   // 打つたびに input で反映済み。離れたときの change では描き直さない（押したボタンが消えないように）
       if (bk[f] !== t.value) { bk[f] = t.value; renderBulkDates(); }
@@ -2553,7 +2649,9 @@
     else if (f === 'type') {
       bk.type = t.value;
       var roles = ROLES_BY_TYPE[bk.type] || [];
-      Object.keys(bk.assign).forEach(function (k) { bk.assign[k] = bk.assign[k].filter(function (r) { return roles.indexOf(r) >= 0; }); });
+      var fit = function (a) { Object.keys(a).forEach(function (k) { a[k] = a[k].filter(function (r) { return roles.indexOf(r) >= 0; }); }); };
+      fit(bk.assign);
+      Object.keys(bk.dayAssign).forEach(function (d) { fit(bk.dayAssign[d]); });   // 種類で使えなくなった役割は日ごとの分からも外す
     } else bk[f] = t.value;
     if (f === 'startTime' || f === 'endTime' || f === 'venue') return;
     p.msg = null;
@@ -2565,11 +2663,16 @@
     if (p.busy) return;
     var err = bulkCheck(bk);
     if (err) { bk.confirm = false; p.msg = { kind: 'ng', text: '⚠ ' + err }; renderPlan(); return; }
-    var dates = bulkChosen(bk), roles = ROLES_BY_TYPE[bk.type] || [], assignments = [];
-    S.staff.forEach(function (st) { (bk.assign[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) assignments.push({ staffId: st.staffId, role: r }); }); });
+    var dates = bulkChosen(bk), roles = bulkRoles(bk);
+    // 日ごとの担当・不在の人（v42〜）
+    var days = dates.map(function (d) {
+      var a = bulkDayAssign(bk, d), assignments = [];
+      if (bk.type !== '不在') S.staff.forEach(function (st) { (a[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) assignments.push({ staffId: st.staffId, role: r }); }); });
+      return { date: d, assignments: assignments, people: bk.type === '不在' ? bulkDayPeople(bk, d).slice() : [] };
+    });
     var body = {
-      month: S.month, opId: bk.opId, dates: dates, type: bk.type, name: bk.name, venue: bk.venue, allDay: !!bk.allDay,
-      startTime: bk.allDay ? '' : bk.startTime, endTime: bk.allDay ? '' : bk.endTime, memo: bk.memo, assignments: assignments
+      month: S.month, opId: bk.opId, days: days, type: bk.type, name: bk.name, venue: bk.venue, allDay: !!bk.allDay,
+      startTime: bk.allDay ? '' : bk.startTime, endTime: bk.allDay ? '' : bk.endTime, memo: bk.memo
     };
     p.busy = true;
     p.msg = { kind: 'busy', text: dates.length + '件作っています…' };
