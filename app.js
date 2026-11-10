@@ -259,7 +259,8 @@
     reissueToken: ['再発行中…', '再発行しました'], reissueAdmin: ['再発行中…', '再発行しました'], familyReissue: ['再発行中…', '再発行しました'],
     calShareAdd: ['共有中…', '共有しました'], calShareRemove: ['解除中…', '外しました'],
     setActive: ['変更中…', '変更しました'], familySetActive: ['変更中…', '変更しました'], athleteSetActive: ['変更中…', '変更しました'],
-    setReplaced: ['変更中…', '変更しました'], deaconConfirm: ['確定中…', '確定しました']
+    setReplaced: ['変更中…', '変更しました'], deaconConfirm: ['確定中…', '確定しました'],
+    saveAppEventsBulk: ['作成中…', '作りました']   // まとめて登録（v41〜）
   };
   var BTN_OK_MS = 2500, BTN_NG_MS = 10000;
   var btnPressed = null, btnBusy = [], btnFlash = [], btnApplying = false;
@@ -513,7 +514,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261029a';
+  var APP_VERSION = '20261110a';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -1924,6 +1925,8 @@
     tab.addEventListener('input', function (e) {
       var f = e.target.dataset && e.target.dataset.ed;
       if (f && S.plan.ed && (f === 'name' || f === 'memo')) S.plan.ed[f] = e.target.value;
+      var fb = e.target.dataset && e.target.dataset.pb;   // まとめて登録（v41〜）：打つたびに同じ名前の印を付け直す
+      if (fb && S.plan.bulk && (fb === 'name' || fb === 'memo')) { S.plan.bulk[fb] = e.target.value; if (fb === 'name') renderBulkDates(); }
     });
   }
 
@@ -1947,6 +1950,8 @@
     var p = S.plan, ed = p && p.ed;
     if (p && p.start) monthsBetween(p.start, p.end || p.start).forEach(function (m) { if (ms.indexOf(m) < 0) ms.push(m); });
     if (ed && ed.startDate && ed.endDate) monthsBetween(ed.startDate, ed.endDate).forEach(function (m) { if (ms.indexOf(m) < 0) ms.push(m); });
+    var bk = p && p.bulk;   // まとめて登録（v41〜）：同じ名前の予定を見るため、期間と足した日の月も読む
+    if (bk) bulkAllDates(bk).concat(bk.from && bk.to ? [bk.from, bk.to] : []).forEach(function (d) { var m = d.slice(0, 7); if (ms.indexOf(m) < 0 && inPeriod(d)) ms.push(m); });
     return ms;
   }
   function inPeriodDate(d) { return /^\d{4}-\d{2}-\d{2}$/.test(d) && inPeriod(d); }
@@ -2020,9 +2025,15 @@
     else if (!cur || cur.status === 'loading') { st.textContent = '予定を読み込み中…'; st.className = 'ev-status busy'; }
     else if (cur.status === 'error') { st.textContent = '⚠ 予定を読み込めませんでした：' + cur.error; st.className = 'ev-status ng'; }
     else { st.textContent = ''; st.className = 'ev-status'; }
-    var editing = !!p.ed;
+    var editing = !!p.ed || !!p.bulk;
     byId('plMain').hidden = editing;
     byId('plEditor').hidden = !editing;
+    if (p.bulk) {
+      // 名前・メモを打っている途中に予定の読み込みが終わったら、入力欄はそのまま（日の一覧と印だけ描き直す）
+      var ae = document.activeElement;
+      if (ae && ae.dataset && /^(name|memo)$/.test(ae.dataset.pb || '') && byId('pbDates') && !p.bulk.confirm) { renderBulkDates(); return; }
+      renderPlanBulk(); return;
+    }
     if (editing) { renderPlanEditor(); return; }
     renderPlanCal();
     renderPlanDetail();
@@ -2154,6 +2165,8 @@
   }
 
   function planClick(e) {
+    var pb = e.target.closest('[data-pb]');
+    if (pb && pb.tagName === 'BUTTON' && S.plan.bulk) { if (!pb.disabled) bulkClick(pb); return; }   // まとめて登録（v41〜）
     var b = e.target.closest('[data-pa]');
     if (!b || b.disabled) return;
     var p = S.plan, act = b.dataset.pa;
@@ -2161,6 +2174,11 @@
       openPlanEditor({ id: null, status: '', type: '練習', name: '', venue: '', startDate: p.start, endDate: p.end || p.start, allDay: true, startTime: '', endTime: '', memo: '', assign: {}, people: [] });
     } else if (act === 'edit') {
       openPlanEditorFor(b.dataset.key);
+    } else if (act === 'dup') {
+      if (p.busy) return;
+      planDuplicate();
+    } else if (act === 'bulk') {
+      openPlanBulk();
     } else if (act === 'back') {
       if (p.busy) return;
       p.ed = null; renderPlan();
@@ -2172,7 +2190,7 @@
       if (i >= 0) cur.splice(i, 1);
       else {
         // 担当にした直後の来る日：○の日だけ（○が無ければ全日）。別の役割で担当なら同じ日のまま
-        if (!cur.length || !ed.assignDays[sid]) ed.assignDays[sid] = defaultAssignDays(sid, datesBetween(ed.startDate, ed.endDate));
+        if ((!cur.length || !ed.assignDays[sid]) && edHasDates(ed)) ed.assignDays[sid] = defaultAssignDays(sid, datesBetween(ed.startDate, ed.endDate));
         cur.push(role);
       }
       renderPlanEditor();
@@ -2195,6 +2213,7 @@
 
   function planChange(e) {
     var t = e.target, p = S.plan;
+    if (p.bulk) { bulkChange(t); return; }   // まとめて登録（v41〜）
     if (planLodgingChange(t)) return;   // 宿泊（v21〜）
     if (t.name === 'plView') { p.view = t.value; renderPlan(); return; }
     if (t.dataset.pd) {
@@ -2217,7 +2236,9 @@
       return;
     } else ed[f] = t.value;
     if (f === 'startDate' || f === 'endDate') {
-      if (!inPeriodDate(ed[f])) ed[f] = f === 'startDate' ? p.start : (p.end || p.start);
+      if (!inPeriodDate(ed[f])) ed[f] = (f === 'startDate' ? p.start : (p.end || p.start)) || '';
+      if (!ed.startDate && ed.endDate) ed.startDate = ed.endDate;   // 複製（v41〜）：日付が空のところから選ぶ
+      if (p.msg && p.msg.kind === 'ng' && /開始日と終了日/.test(p.msg.text || '') && edHasDates(ed)) { p.msg = null; renderPlan(); }
       if (ed.endDate < ed.startDate) { if (f === 'startDate') ed.endDate = ed.startDate; else ed.startDate = ed.endDate; }
       lgFitNights(ed);
     }
@@ -2226,14 +2247,17 @@
 
   function renderPlanEditor() {
     var p = S.plan, ed = p.ed;
-    var dates = datesBetween(ed.startDate, ed.endDate);
+    var hasDates = edHasDates(ed);   // 複製（v41〜）は日付が空のところから
+    var dates = hasDates ? datesBetween(ed.startDate, ed.endDate) : [];
     var br = planBreak(dates);
     var roles = ROLES_BY_TYPE[ed.type] || [];
     var lim = { min: S.period.start + '-01', max: periodLastDay() };
     var isNew = !ed.id;
-    var h = '<div class="pl-sticky"><div><b>' + esc(ed.startDate === ed.endDate ? longDate(ed.startDate) : longDate(ed.startDate) + '〜' + longDate(ed.endDate)) + '</b> ' + dates.length + '日間' +
-      (ed.status ? ' <span class="badge ' + (ed.status === '下書き' ? 'draft' : ed.status === '中止' ? 'tent' : 'venue') + '">' + esc(ed.status) + '</span>' : ' <span class="badge draft">新規</span>') + '</div>' +
-      '<div class="pl-sum"><span>スタッフ：' + breakLine(br.staff, true) + '</span><span>選手：' + breakLine(br.ath, true) + '</span></div></div>';
+    var badge = ed.status ? ' <span class="badge ' + (ed.status === '下書き' ? 'draft' : ed.status === '中止' ? 'tent' : 'venue') + '">' + esc(ed.status) + '</span>' : ' <span class="badge draft">' + (ed.dup ? '複製' : '新規') + '</span>';
+    var h = hasDates
+      ? '<div class="pl-sticky"><div><b>' + esc(ed.startDate === ed.endDate ? longDate(ed.startDate) : longDate(ed.startDate) + '〜' + longDate(ed.endDate)) + '</b> ' + dates.length + '日間' + badge + '</div>' +
+        '<div class="pl-sum"><span>スタッフ：' + breakLine(br.staff, true) + '</span><span>選手：' + breakLine(br.ath, true) + '</span></div></div>'
+      : '<div class="pl-sticky"><div><b>日付を選んでください</b>' + badge + '</div></div>';
     h += '<button type="button" class="link-btn" data-pa="back"' + (p.busy ? ' disabled' : '') + '>← 計画に戻る（保存しない）</button>';
     h += '<div class="pl-form">' +
       '<label>種類 <select data-ed="type">' + PLAN_TYPES.map(function (t) { return '<option value="' + t[0] + '"' + (ed.type === t[0] ? ' selected' : '') + '>' + t[1] + '</option>'; }).join('') + '</select></label>' +
@@ -2264,7 +2288,7 @@
         '<ul class="pl-cands">' + cands.map(function (x) {
           var c = x.c, r = S.roles[x.st.staffId];
           return '<li class="k-' + c.cat + '"><span class="nm">' + esc(x.st.name) + '</span>' +
-            '<span class="av">○ ' + c.o + '/' + c.days + '日' + (c.t ? '・△' + c.t : '') + (c.x ? '・×' + c.x : '') + '</span>' +
+            '<span class="av">' + (c.days ? '○ ' + c.o + '/' + c.days + '日' + (c.t ? '・△' + c.t : '') + (c.x ? '・×' + c.x : '') : '—') + '</span>' +
             '<span class="rb">' + roles.map(function (role) {
               var on = (ed.assign[x.st.staffId] || []).indexOf(role) >= 0;
               var pref = r && r[role] ? (r[role] === '積極的にやりたい' ? '積極的' : r[role]) : '';
@@ -2275,7 +2299,7 @@
               ? '<div class="assign-days">来る日：' + dayChips(dates, (ed.assignDays && ed.assignDays[x.st.staffId]) || dates, ' data-pa="pday" data-staff="' + esc(x.st.staffId) + '"', p.busy) + '</div>' : '') + '</li>';
         }).join('') + '</ul>';
     }
-    h += planLodgingHtml(ed);   // 宿泊（v21〜）。担当の下に置く
+    h += hasDates ? planLodgingHtml(ed) : (PARTIAL_DEFAULT.hasOwnProperty(ed.type) ? '<h3 class="pl-h">宿泊</h3><p class="hint">日付を選ぶと宿泊を設定できます。</p>' : '');   // 宿泊（v21〜）。担当の下に置く
     // ボタン
     var dis = p.busy ? ' disabled' : '';
     h += '<div class="pl-acts">';
@@ -2291,8 +2315,277 @@
       h += '<button type="button" class="primary" data-pa="save" data-status="確定"' + dis + '>確定に戻す</button>' +
         '<button type="button" class="secondary" data-pa="save" data-status="中止"' + dis + '>中止のまま保存</button>';
     }
-    h += '</div><p class="hint">下書きは管理者だけに見えます（カレンダーに反映せず、家族にも出ません）。確定すると「予定と担当」で参加の受付・カレンダー反映ができます。</p>';
+    h += '</div>';
+    if (!isNew) h += '<div class="pl-dup"><button type="button" class="secondary" data-pa="dup"' + dis + '>この予定を複製</button>' +
+      '<span class="hint">種類・名前・会場・時刻・担当・メモをコピーして、新しい予定を作ります（日付は選び直し。宿泊と参加の受付はコピーしません）</span></div>';
+    h += '<p class="hint">下書きは管理者だけに見えます（カレンダーに反映せず、家族にも出ません）。確定すると「予定と担当」で参加の受付・カレンダー反映ができます。</p>';
     byId('plEditor').innerHTML = h;
+  }
+
+  function edHasDates(ed) { return !!(ed && inPeriodDate(ed.startDate || '') && inPeriodDate(ed.endDate || '')); }
+
+  // ---------------------------------------------------------------- 複製とまとめて登録（v41〜・城さん決定 2026-11-09）
+  // ★ 複製：種類・名前・会場・開始/終了時刻・終日・担当・スタッフ向けメモ（不在は不在の人）をコピーした新しい予定の入力画面。
+  //   日付は空にして選び直す。宿泊の設定と参加の受付（時間の指定を含む）はコピーしない。保存は今までどおり（下書き保存／確定）
+  // ★ まとめて登録：期間と曜日で日を出し、カレンダーで足し外し。1日ずつ別の予定として「下書き」で作る（1回50件まで）
+  //   祝日・同じ名前の予定がある日は印を付ける。同じ名前の予定がある日は最初は外しておく（選べば作る）
+  // ★ どちらも MICスケジュールには書かない（アプリの予定だけ）
+
+  var BULK_MAX = 50;
+  var BULK_TYPES = PLAN_TYPES.filter(function (t) { return t[0] !== '不在'; });
+
+  function planDuplicate() {
+    var src = S.plan.ed;
+    if (!src || !src.id) return;
+    var assign = {};
+    Object.keys(src.assign || {}).forEach(function (k) { if ((src.assign[k] || []).length) assign[k] = src.assign[k].slice(); });
+    openPlanEditor({
+      id: null, status: '', dup: true, type: src.type, name: src.name, venue: src.venue || '', startDate: '', endDate: '',
+      allDay: !!src.allDay, startTime: src.allDay ? '' : src.startTime, endTime: src.allDay ? '' : src.endTime, memo: src.memo || '',
+      assign: assign, assignDays: {}, people: (src.people || []).slice()
+    });
+    S.plan.msg = { kind: 'ok', text: '「' + src.name + '」を複製しました。日付を選んで保存してください（まだ保存していません）' };
+    renderPlan();
+  }
+
+  function openPlanBulk() {
+    var p = S.plan;
+    var from = p.start && inPeriodDate(p.start) ? p.start : (S.month + '-01' >= S.period.start + '-01' ? S.month + '-01' : S.period.start + '-01');
+    var to = p.end && p.end > from ? p.end : daysOf(from.slice(0, 7)).slice(-1)[0];
+    if (!inPeriod(to)) to = periodLastDay();
+    p.bulk = {
+      opId: newOpId(), from: from, to: to, wds: [], add: [], drop: [], pick: {}, confirm: false, calMonth: from.slice(0, 7),
+      type: '練習', name: '', venue: '', allDay: true, startTime: '', endTime: '', memo: '', assign: {}
+    };
+    p.msg = null;
+    renderPlan();
+    window.scrollTo(0, 0);
+  }
+
+  /** 期間と曜日で出る日 → 足した日・外した日。期間の中・並べる */
+  function bulkAllDates(bk) {
+    var out = [];
+    if (bk.from && bk.to && bk.wds.length) {
+      for (var d = bk.from, i = 0; d <= bk.to && i < 400; d = addDays(d, 1), i++) if (bk.wds.indexOf(weekday(d)) >= 0) out.push(d);
+    }
+    bk.add.forEach(function (d) { if (out.indexOf(d) < 0) out.push(d); });
+    out = out.filter(function (d) { return bk.drop.indexOf(d) < 0 && inPeriodDate(d); });
+    return out.sort();
+  }
+  /** その日に同じ名前の予定（アプリ・カレンダーとも。中止は除く）があるか */
+  function bulkSame(bk, d) {
+    var nm = String(bk.name || '').trim();
+    if (!nm) return null;
+    return planEventsAll().filter(function (ev) { return !ev.cancelled && ev.dates.indexOf(d) >= 0 && String(ev.title).trim() === nm; })[0] || null;
+  }
+  /** 作るか：手で選んだらそのまま。選んでいなければ、同じ名前の予定がある日だけ外す */
+  function bulkOn(bk, d) { return bk.pick.hasOwnProperty(d) ? bk.pick[d] : !bulkSame(bk, d); }
+  function bulkChosen(bk) { return bulkAllDates(bk).filter(function (d) { return bulkOn(bk, d); }); }
+  function bulkMonthsReady(bk) {
+    return bulkAllDates(bk).every(function (d) { var e = S.events[d.slice(0, 7)]; return e && e.data; });
+  }
+
+  function renderPlanBulk() {
+    var p = S.plan, bk = p.bulk;
+    var lim = { min: S.period.start + '-01', max: periodLastDay() };
+    var dis = p.busy ? ' disabled' : '';
+    var chosen = bulkChosen(bk);
+    var h = '<div class="pl-sticky"><div><b>まとめて登録</b> <span class="badge draft">下書きで作る</span></div>' +
+      '<div class="pl-sum"><span id="pbSum">' + bulkSumText(chosen.length) + '</span></div></div>';
+    h += '<button type="button" class="link-btn" data-pb="back"' + dis + '>← 計画に戻る（作らない）</button>';
+    if (bk.confirm) {
+      h += '<div class="pb-confirm"><h3 class="pl-h">' + chosen.length + '件作ります</h3>' +
+        '<p>' + esc(bk.name) + '（' + esc((BULK_TYPES.filter(function (t) { return t[0] === bk.type; })[0] || ['', ''])[1]) + (bk.venue ? '・' + esc(bk.venue) : '') + '・' +
+        (bk.allDay ? '終日' : esc(bk.startTime + '–' + bk.endTime)) + '）をすべて「下書き」で作ります。</p>' +
+        '<ol class="pb-confirm-list">' + chosen.map(function (d) {
+          return '<li>' + esc(longDate(d)) + (bulkSame(bk, d) ? ' <span class="badge tent">同じ名前の予定あり</span>' : '') + '</li>';
+        }).join('') + '</ol>' +
+        '<div class="pl-acts"><button type="button" class="primary" data-pb="create"' + dis + '>' + chosen.length + '件作る</button>' +
+        '<button type="button" class="secondary" data-pb="unconfirm"' + dis + '>戻って直す</button></div>' +
+        '<p class="hint">作ったあとは1件ずつ開いて確定してください（確定は今までどおり）。MICスケジュールには書き込みません。</p></div>';
+      byId('plEditor').innerHTML = h;
+      return;
+    }
+    // 1. 日を選ぶ
+    h += '<h3 class="pl-h">1. 日を選ぶ</h3><div class="pl-dates">' +
+      '<label>期間のはじめ <input type="date" data-pb="from" value="' + esc(bk.from) + '" min="' + lim.min + '" max="' + lim.max + '"></label>' +
+      '<label>期間のおわり <input type="date" data-pb="to" value="' + esc(bk.to) + '" min="' + lim.min + '" max="' + lim.max + '"></label></div>' +
+      '<fieldset class="pb-wds"><legend>曜日</legend>' + WD.map(function (w, i) {
+        return '<label class="' + (i === 0 ? 'sun' : i === 6 ? 'sat' : '') + '"><input type="checkbox" data-pb="wd" value="' + i + '"' + (bk.wds.indexOf(i) >= 0 ? ' checked' : '') + '> ' + w + '</label>';
+      }).join('') + '</fieldset>';
+    h += '<div id="pbCal">' + bulkCalHtml(bk) + '</div>';
+    h += '<div id="pbDates">' + bulkDatesHtml(bk) + '</div>';
+    // 2. 中身
+    h += '<h3 class="pl-h">2. 予定の中身（全部の日で同じ）</h3><div class="pl-form">' +
+      '<label>種類 <select data-pb="type">' + BULK_TYPES.map(function (t) { return '<option value="' + t[0] + '"' + (bk.type === t[0] ? ' selected' : '') + '>' + t[1] + '</option>'; }).join('') + '</select></label>' +
+      '<label>名前 <input type="text" data-pb="name" maxlength="40" value="' + esc(bk.name) + '" placeholder="例：O-air 練習会"></label>' +
+      '<label>会場 <select data-pb="venue"><option value="">なし（会場で絞らない）</option>' + S.venues.map(function (v) { return '<option' + (bk.venue === v ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join('') + '</select></label>' +
+      '<label class="chk"><input type="checkbox" data-pb="allDay"' + (bk.allDay ? ' checked' : '') + '> 終日</label>' +
+      (bk.allDay ? '' : '<div class="pl-dates"><label>開始時刻 <input type="time" step="300" data-pb="startTime" value="' + esc(bk.startTime) + '"></label>' +
+        '<label>終了時刻 <input type="time" step="300" data-pb="endTime" value="' + esc(bk.endTime) + '"></label></div>') +
+      '<label>スタッフ向けメモ <textarea data-pb="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(bk.memo) + '</textarea></label></div>';
+    // 3. 担当
+    var roles = ROLES_BY_TYPE[bk.type] || [];
+    var cands = staffCands(chosen);
+    var names = [];
+    S.staff.forEach(function (st) { (bk.assign[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) names.push(esc(st.name) + '（' + ROLE_SHORT[r] + '）'); }); });
+    h += '<h3 class="pl-h">3. 担当 <small class="muted">' + (names.length ? names.join('・') : '未定') + '</small></h3>' +
+      '<p class="hint">全部の日に同じ担当が付きます（日ごとに変えるときは、作ったあとで1件ずつ直してください）。○の数は選んだ日の分です。</p>' +
+      '<ul class="pl-cands">' + cands.map(function (x) {
+        var c = x.c;
+        return '<li class="k-' + c.cat + '"><span class="nm">' + esc(x.st.name) + '</span>' +
+          '<span class="av">' + (c.days ? '○ ' + c.o + '/' + c.days + '日' + (c.t ? '・△' + c.t : '') + (c.x ? '・×' + c.x : '') : '—') + '</span>' +
+          '<span class="rb">' + roles.map(function (role) {
+            var on = (bk.assign[x.st.staffId] || []).indexOf(role) >= 0;
+            return '<button type="button" class="role-btn' + (on ? ' on' : '') + '" data-pb="role" data-staff="' + esc(x.st.staffId) + '" data-role="' + role + '" aria-pressed="' + on + '">' + (on ? '✓' : '') + ROLE_SHORT[role] + '</button>';
+          }).join('') + '</span></li>';
+      }).join('') + '</ul>';
+    h += '<div class="pl-acts"><button type="button" class="primary" data-pb="confirm"' + dis + '>まとめて作る（' + chosen.length + '件）</button></div>' +
+      '<p class="hint">作る前に日付の一覧で確かめます。作った予定は「下書き」です（管理者だけに見え、カレンダーに反映しません）。</p>';
+    byId('plEditor').innerHTML = h;
+  }
+
+  /** 選んだ日のカレンダー（1か月ずつ）。押すと足す・外す */
+  function bulkCalHtml(bk) {
+    var m = bk.calMonth, months = monthsOf(S.period), mi = months.indexOf(m);
+    var all = bulkAllDates(bk);
+    var h = '<div class="pb-nav"><button type="button" data-pb="cprev" aria-label="前の月"' + (mi <= 0 ? ' disabled' : '') + '>‹</button>' +
+      '<span class="pb-month">' + (+m.slice(0, 4)) + '年' + (+m.slice(5, 7)) + '月</span>' +
+      '<button type="button" data-pb="cnext" aria-label="次の月"' + (mi < 0 || mi >= months.length - 1 ? ' disabled' : '') + '>›</button></div>' +
+      '<div class="cal-head"><span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span></div><div class="pb-cal">';
+    var days = daysOf(m);
+    for (var i = 0; i < weekday(days[0]); i++) h += '<span class="blank"></span>';
+    days.forEach(function (d) {
+      var w = weekday(d), inL = all.indexOf(d) >= 0, on = inL && bulkOn(bk, d), same = inL && bulkSame(bk, d);
+      var cls = ['pb-day'];
+      if (w === 0 || HOLIDAYS[d]) cls.push('sun'); else if (w === 6) cls.push('sat');
+      if (inL) cls.push(on ? 'on' : 'off');
+      var ok = inPeriodDate(d);
+      h += '<button type="button" class="' + cls.join(' ') + '" data-pb="day" data-day="' + d + '"' + (ok ? '' : ' disabled') + ' aria-pressed="' + inL + '" aria-label="' + esc(longDate(d) + (inL ? (on ? '・作る' : '・一覧にあるが作らない') : '')) + '">' +
+        '<span class="dn">' + parts(d)[2] + '</span>' + (same ? '<i class="pb-same" aria-hidden="true">同</i>' : '') + '</button>';
+    });
+    return h + '</div><p class="hint">日を押すと一覧に足す・外す。曜日で出た日も外せます。</p>';
+  }
+
+  function bulkDatesHtml(bk) {
+    var all = bulkAllDates(bk), chosen = bulkChosen(bk);
+    if (!all.length) return '<p class="hint pl-pick">曜日を選ぶか、カレンダーの日を押すと、作る日が一覧に出ます。</p>';
+    var h = '<p class="pb-count"><b>' + chosen.length + '件</b>作る（一覧 ' + all.length + '日）' + (chosen.length > BULK_MAX ? ' <span class="ng-text">1回' + BULK_MAX + '件までです。日を減らしてください</span>' : '') + '</p>';
+    if (String(bk.name || '').trim() && !bulkMonthsReady(bk)) h += '<p class="hint">同じ名前の予定を確かめるため、予定を読み込み中…</p>';
+    h += '<ul class="pb-list">' + all.map(function (d) {
+      var same = bulkSame(bk, d), on = bulkOn(bk, d);
+      return '<li class="' + (on ? '' : 'off') + '"><label><input type="checkbox" data-pb="pick" value="' + d + '"' + (on ? ' checked' : '') + '> ' + esc(longDate(d)) + '</label>' +
+        (HOLIDAYS[d] ? ' <span class="badge hol">祝日：' + esc(HOLIDAYS[d]) + '</span>' : '') +
+        (same ? ' <span class="badge tent">同じ名前の予定あり（' + esc(same.cal === 'アプリ' ? 'アプリ' + (same.appStatus ? '・' + same.appStatus : '') : same.cal === 'レッスン' ? 'MICレッスン' : 'MICスケジュール') + '）</span>' : '') + '</li>';
+    }).join('') + '</ul>';
+    return h;
+  }
+  /** 名前を打つたび・予定を読み込んだあとに、日の一覧とカレンダーの印だけ描き直す（入力欄のフォーカスを保つ） */
+  function renderBulkDates() {
+    var bk = S.plan && S.plan.bulk;
+    if (!bk || bk.confirm) return;
+    var a = byId('pbDates'), c = byId('pbCal');
+    if (a) a.innerHTML = bulkDatesHtml(bk);
+    if (c) c.innerHTML = bulkCalHtml(bk);
+    var n = bulkChosen(bk).length, b = document.querySelector('[data-pb="confirm"]'), sm = byId('pbSum');
+    if (sm) sm.textContent = bulkSumText(n);
+    if (b && !b.classList.contains('btn-busy')) b.textContent = 'まとめて作る（' + n + '件）';
+  }
+
+  function bulkSumText(n) { return '作る予定：' + n + '件' + (n > BULK_MAX ? '（1回' + BULK_MAX + '件まで）' : ''); }
+
+  function bulkClick(b) {
+    var p = S.plan, bk = p.bulk, act = b.dataset.pb;
+    if (act === 'back') { if (p.busy) return; p.bulk = null; p.msg = null; renderPlan(); return; }
+    if (act === 'cprev' || act === 'cnext') {
+      var ms = monthsOf(S.period), i = ms.indexOf(bk.calMonth) + (act === 'cprev' ? -1 : 1);
+      if (i >= 0 && i < ms.length) { bk.calMonth = ms[i]; if (!S.events[bk.calMonth]) loadEvents(bk.calMonth); }
+      renderPlan(); return;
+    }
+    if (act === 'day') {
+      var d = b.dataset.day, all = bulkAllDates(bk);
+      if (all.indexOf(d) >= 0) { bk.add = bk.add.filter(function (x) { return x !== d; }); if (bk.drop.indexOf(d) < 0) bk.drop.push(d); }
+      else { bk.drop = bk.drop.filter(function (x) { return x !== d; }); if (bk.add.indexOf(d) < 0) bk.add.push(d); bk.pick[d] = true; }
+      renderPlan(); return;
+    }
+    if (act === 'role') {
+      var cur = bk.assign[b.dataset.staff] = bk.assign[b.dataset.staff] || [], j = cur.indexOf(b.dataset.role);
+      if (j >= 0) cur.splice(j, 1); else cur.push(b.dataset.role);
+      renderPlan(); return;
+    }
+    if (act === 'confirm') {
+      var err = bulkCheck(bk);
+      if (err) { p.msg = { kind: 'ng', text: '⚠ ' + err }; renderPlan(); return; }
+      bk.confirm = true; p.msg = null; renderPlan(); window.scrollTo(0, 0); return;
+    }
+    if (act === 'unconfirm') { bk.confirm = false; renderPlan(); return; }
+    if (act === 'create') { bulkSave(); return; }
+  }
+
+  function bulkCheck(bk) {
+    var n = bulkChosen(bk).length;
+    if (!n) return '作る日を1日以上選んでください';
+    if (n > BULK_MAX) return '一度に作れるのは' + BULK_MAX + '件までです（いまは' + n + '件）。期間を分けてください';
+    if (!String(bk.name || '').trim()) return '名前を入れてください';
+    if (!bk.allDay && (!bk.startTime || !bk.endTime)) return '時刻を入れるか、「終日」にしてください';
+    if (!bk.allDay && bk.endTime <= bk.startTime) return '終了の時刻は開始より後にしてください';
+    return '';
+  }
+
+  function bulkChange(t) {
+    var p = S.plan, bk = p.bulk, f = t.dataset.pb;
+    if (!f) return;
+    if (f === 'from' || f === 'to') {
+      var v = t.value;
+      if (!inPeriodDate(v)) { renderPlan(); return; }
+      bk[f] = v;
+      if (bk.to < bk.from) { if (f === 'from') bk.to = v; else bk.from = v; }
+      bk.calMonth = bk.from.slice(0, 7);
+    } else if (f === 'wd') {
+      var w = +t.value, i = bk.wds.indexOf(w);
+      if (t.checked && i < 0) bk.wds.push(w); else if (!t.checked && i >= 0) bk.wds.splice(i, 1);
+    } else if (f === 'pick') { bk.pick[t.value] = t.checked; }
+    else if (f === 'allDay') bk.allDay = t.checked;
+    else if (f === 'name' || f === 'memo') {   // 打つたびに input で反映済み。離れたときの change では描き直さない（押したボタンが消えないように）
+      if (bk[f] !== t.value) { bk[f] = t.value; renderBulkDates(); }
+      return;
+    }
+    else if (f === 'type') {
+      bk.type = t.value;
+      var roles = ROLES_BY_TYPE[bk.type] || [];
+      Object.keys(bk.assign).forEach(function (k) { bk.assign[k] = bk.assign[k].filter(function (r) { return roles.indexOf(r) >= 0; }); });
+    } else bk[f] = t.value;
+    if (f === 'startTime' || f === 'endTime' || f === 'venue') return;
+    p.msg = null;
+    renderPlan();
+  }
+
+  function bulkSave() {
+    var p = S.plan, bk = p.bulk;
+    if (p.busy) return;
+    var err = bulkCheck(bk);
+    if (err) { bk.confirm = false; p.msg = { kind: 'ng', text: '⚠ ' + err }; renderPlan(); return; }
+    var dates = bulkChosen(bk), roles = ROLES_BY_TYPE[bk.type] || [], assignments = [];
+    S.staff.forEach(function (st) { (bk.assign[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) assignments.push({ staffId: st.staffId, role: r }); }); });
+    var body = {
+      month: S.month, opId: bk.opId, dates: dates, type: bk.type, name: bk.name, venue: bk.venue, allDay: !!bk.allDay,
+      startTime: bk.allDay ? '' : bk.startTime, endTime: bk.allDay ? '' : bk.endTime, memo: bk.memo, assignments: assignments
+    };
+    p.busy = true;
+    p.msg = { kind: 'busy', text: dates.length + '件作っています…' };
+    renderPlan();
+    api('saveAppEventsBulk', body, 90000).then(function (r) {
+      S.events[S.month] = { status: 'ok', data: r, at: Date.now() };
+      Object.keys(S.events).forEach(function (m) { if (m !== S.month) delete S.events[m]; });
+      var n = (r.saved && r.saved.count) || dates.length;
+      p.bulk = null;
+      p.start = dates[0]; p.end = dates[dates.length - 1]; p.pick = 'start';
+      if (S.month !== dates[0].slice(0, 7) && monthsOf(S.period).indexOf(dates[0].slice(0, 7)) >= 0) S.month = dates[0].slice(0, 7);
+      p.msg = { kind: 'ok', text: '✓ ' + bk.name + '：' + n + '件を下書きで作りました（' + shortDays([dates[0]]) + (dates.length > 1 ? '〜' + shortDays([dates[dates.length - 1]]) : '') + '）。確定は1件ずつ「開く」から' };
+      saveCache();
+    }, function (e) {
+      p.msg = { kind: 'ng', text: '⚠ 作れませんでした：' + (/不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message) };
+    }).then(function () { p.busy = false; renderPlan(); renderEvents(); });
   }
 
   /** 時間の指定：手で変えていなければ種類で決める（練習会はオン、合宿・大会はオフ） */
@@ -2308,6 +2601,7 @@
     var p = S.plan, ed = p.ed;
     if (p.busy) return;
     if (!String(ed.name || '').trim()) { p.msg = { kind: 'ng', text: '⚠ 名前を入れてください' }; renderPlan(); return; }
+    if (!edHasDates(ed)) { p.msg = { kind: 'ng', text: '⚠ 開始日と終了日を選んでください' }; renderPlan(); return; }
     if (!ed.allDay && (!ed.startTime || !ed.endTime)) { p.msg = { kind: 'ng', text: '⚠ 時刻を入れるか、「終日」にしてください' }; renderPlan(); return; }
     if (status === '中止' && ed.status !== '中止' && !window.confirm('この予定を中止にします。\nカレンダーからは次の反映で消え、家族にも出なくなります。よろしいですか？')) return;
     var roles = ROLES_BY_TYPE[ed.type] || [];

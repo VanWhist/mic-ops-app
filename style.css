@@ -752,3 +752,35 @@ button.btn-busy { opacity: .6; cursor: progress; pointer-events: none; }
 .lg-bill-fam { margin: 8px 0; padding: 8px 10px; border: 1px solid #f1d49a; background: #fffaf0; border-radius: 8px; font-size: 14px; }
 .lg-bill-fam .hint { margin: 4px 0 0; }
 .lga-adults { display: block; margin: 8px 0 2px; }
+
+/* 複製とまとめて登録（v41〜） */
+.pl-tools { margin: 0 0 10px; }
+.pl-tools .secondary, .pl-dup .secondary { min-height: 44px; padding: 8px 14px; border-radius: 8px; font-size: 15px; font-weight: 700; }
+.pl-dup { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 4px 0 10px; }
+.pb-wds { display: flex; flex-wrap: wrap; gap: 6px 10px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin: 8px 0; }
+.pb-wds legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
+.pb-wds label { display: flex; align-items: center; gap: 4px; font-size: 16px; min-height: 40px; }
+.pb-wds label.sun { color: var(--sun); } .pb-wds label.sat { color: var(--sat); }
+.pb-wds input { width: 22px; height: 22px; }
+.pb-nav { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 10px 0 6px; }
+.pb-nav button { width: 44px; height: 42px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; font-size: 22px; line-height: 1; }
+.pb-nav button:disabled { opacity: .3; }
+.pb-month { font-weight: 700; }
+.pb-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.pb-day { position: relative; min-height: 42px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); font-size: 15px; color: var(--ink); padding: 0; }
+.pb-day.sun { color: var(--sun); } .pb-day.sat { color: var(--sat); }
+.pb-day.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.pb-day.off { background: #fff; border: 2px dashed var(--muted); }
+.pb-day:disabled { opacity: .3; }
+.pb-same { position: absolute; top: 1px; right: 2px; font-style: normal; font-size: 10px; line-height: 1; padding: 1px 2px; border-radius: 3px; background: var(--t-bg); color: var(--t); }
+.pb-count { margin: 8px 0 4px; }
+.pb-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; max-height: 320px; overflow-y: auto; }
+.pb-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 8px; border-top: 1px solid var(--line); }
+.pb-list li:first-child { border-top: 0; }
+.pb-list li.off { color: var(--muted); }
+.pb-list label { display: flex; align-items: center; gap: 6px; min-height: 36px; font-size: 15px; }
+.pb-list input { width: 22px; height: 22px; }
+.badge.hol { background: #fdecea; color: var(--sun); border-color: #f5c2bd; }
+.ng-text { color: var(--sun); font-weight: 700; }
+.pb-confirm-list { margin: 6px 0 10px; padding-left: 1.6em; max-height: 360px; overflow-y: auto; }
+.pb-confirm-list li { padding: 2px 0; }
