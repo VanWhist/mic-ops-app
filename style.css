@@ -797,3 +797,11 @@ button.btn-busy { opacity: .6; cursor: progress; pointer-events: none; }
 .pb-day-cands .sym { min-width: 26px; text-align: center; border-radius: 4px; font-weight: 700; }
 .pb-confirm-list .pb-asg { font-size: 13px; color: var(--muted); }
 .pb-confirm-list .pb-asg.changed { color: var(--ink); font-weight: 700; }
+/* 確定で作る・下書きをまとめて確定（v43〜） */
+.pl-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+.pb-status { display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin: 8px 0; }
+.pb-status legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
+.pb-status label { display: flex; align-items: center; gap: 6px; min-height: 40px; font-size: 15px; }
+.pb-status input { width: 22px; height: 22px; }
+.pc-list li label { flex: 1 1 auto; }
+.pc-list .badge, .pb-confirm-list .badge { white-space: nowrap; }
