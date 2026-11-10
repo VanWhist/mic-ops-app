@@ -774,7 +774,7 @@ button.btn-busy { opacity: .6; cursor: progress; pointer-events: none; }
 .pb-day:disabled { opacity: .3; }
 .pb-same { position: absolute; top: 1px; right: 2px; font-style: normal; font-size: 10px; line-height: 1; padding: 1px 2px; border-radius: 3px; background: var(--t-bg); color: var(--t); }
 .pb-count { margin: 8px 0 4px; }
-.pb-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; max-height: 320px; overflow-y: auto; }
+.pb-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; }   /* v42〜：日ごとの担当を開くので高さで区切らない */
 .pb-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 8px; border-top: 1px solid var(--line); }
 .pb-list li:first-child { border-top: 0; }
 .pb-list li.off { color: var(--muted); }
@@ -784,3 +784,16 @@ button.btn-busy { opacity: .6; cursor: progress; pointer-events: none; }
 .ng-text { color: var(--sun); font-weight: 700; }
 .pb-confirm-list { margin: 6px 0 10px; padding-left: 1.6em; max-height: 360px; overflow-y: auto; }
 .pb-confirm-list li { padding: 2px 0; }
+/* まとめて登録の日ごとの担当（v42〜） */
+.pb-list .pb-asg { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; padding-left: 28px; font-size: 13px; color: var(--muted); }
+.pb-list li.off .pb-asg { display: none; }
+.pb-asg.changed { color: var(--ink); font-weight: 700; }
+.pb-asg .mini { min-height: 34px; }
+.pb-dayed { flex-basis: 100%; margin: 4px 0 2px 28px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.pb-dayed label { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; margin-right: 12px; }
+.pb-day-cands { list-style: none; margin: 0; padding: 0; }
+.pb-list .pb-day-cands li { display: flex; align-items: center; gap: 8px; padding: 3px 0; border-top: 0; }
+.pb-day-cands .nm { flex: 1; }
+.pb-day-cands .sym { min-width: 26px; text-align: center; border-radius: 4px; font-weight: 700; }
+.pb-confirm-list .pb-asg { font-size: 13px; color: var(--muted); }
+.pb-confirm-list .pb-asg.changed { color: var(--ink); font-weight: 700; }
