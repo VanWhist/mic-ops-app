@@ -260,7 +260,8 @@
     calShareAdd: ['共有中…', '共有しました'], calShareRemove: ['解除中…', '外しました'],
     setActive: ['変更中…', '変更しました'], familySetActive: ['変更中…', '変更しました'], athleteSetActive: ['変更中…', '変更しました'],
     setReplaced: ['変更中…', '変更しました'], deaconConfirm: ['確定中…', '確定しました'],
-    saveAppEventsBulk: ['作成中…', '作りました']   // まとめて登録（v41〜）
+    saveAppEventsBulk: ['作成中…', '作りました'],   // まとめて登録（v41〜）
+    confirmAppEvents: ['確定中…', '確定しました']   // 下書きをまとめて確定（v43〜）
   };
   var BTN_OK_MS = 2500, BTN_NG_MS = 10000;
   var btnPressed = null, btnBusy = [], btnFlash = [], btnApplying = false;
@@ -514,7 +515,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261110b';
+  var APP_VERSION = '20261110c';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -2025,9 +2026,10 @@
     else if (!cur || cur.status === 'loading') { st.textContent = '予定を読み込み中…'; st.className = 'ev-status busy'; }
     else if (cur.status === 'error') { st.textContent = '⚠ 予定を読み込めませんでした：' + cur.error; st.className = 'ev-status ng'; }
     else { st.textContent = ''; st.className = 'ev-status'; }
-    var editing = !!p.ed || !!p.bulk;
+    var editing = !!p.ed || !!p.bulk || !!p.conf;
     byId('plMain').hidden = editing;
     byId('plEditor').hidden = !editing;
+    if (p.conf) { renderPlanConf(); return; }   // 下書きをまとめて確定（v43〜）
     if (p.bulk) {
       // 名前・メモを打っている途中に予定の読み込みが終わったら、入力欄はそのまま（日の一覧と印だけ描き直す）
       var ae = document.activeElement;
@@ -2165,6 +2167,8 @@
   }
 
   function planClick(e) {
+    var pc = e.target.closest('[data-pc]');
+    if (pc && pc.tagName === 'BUTTON' && S.plan.conf) { if (!pc.disabled) confClick(pc); return; }   // 下書きをまとめて確定（v43〜）
     var pb = e.target.closest('[data-pb]');
     if (pb && pb.tagName === 'BUTTON' && S.plan.bulk) { if (!pb.disabled) bulkClick(pb); return; }   // まとめて登録（v41〜）
     var b = e.target.closest('[data-pa]');
@@ -2177,6 +2181,8 @@
     } else if (act === 'dup') {
       if (p.busy) return;
       planDuplicate();
+    } else if (act === 'confirm-drafts') {
+      openPlanConf();
     } else if (act === 'bulk') {
       openPlanBulk();
     } else if (act === 'dup-bulk') {
@@ -2217,6 +2223,7 @@
   function planChange(e) {
     var t = e.target, p = S.plan;
     if (p.bulk) { bulkChange(t); return; }   // まとめて登録（v41〜）
+    if (p.conf) { if (t.dataset.pc === 'pick') { p.conf.off[t.value] = !t.checked; renderPlanConf(); } return; }   // まとめて確定（v43〜）
     if (planLodgingChange(t)) return;   // 宿泊（v21〜）
     if (t.name === 'plView') { p.view = t.value; renderPlan(); return; }
     if (t.dataset.pd) {
@@ -2362,7 +2369,7 @@
     if (!inPeriod(to)) to = periodLastDay();
     p.bulk = {
       opId: newOpId(), from: from, to: to, wds: [], add: [], drop: [], pick: {}, confirm: false, calMonth: from.slice(0, 7),
-      type: '練習', name: '', venue: '', allDay: true, startTime: '', endTime: '', memo: '', assign: {}, people: [],
+      type: '練習', name: '', venue: '', allDay: true, startTime: '', endTime: '', memo: '', assign: {}, people: [], status: '下書き',
       dayAssign: {}, dayPeople: {}, openDay: null   // 日ごとの担当・不在の人（v42〜。無い日は共通のまま）
     };
     if (seed) Object.keys(seed).forEach(function (k) { p.bulk[k] = seed[k]; });
@@ -2458,20 +2465,26 @@
     var lim = { min: S.period.start + '-01', max: periodLastDay() };
     var dis = p.busy ? ' disabled' : '';
     var chosen = bulkChosen(bk);
-    var h = '<div class="pl-sticky"><div><b>まとめて登録</b> <span class="badge draft">下書きで作る</span></div>' +
+    var mkConf = bk.status === '確定';   // 確定で作る（v43〜）
+    var h = '<div class="pl-sticky"><div><b>まとめて登録</b> ' + (bk.confirm && mkConf ? '<span class="badge venue">確定で作る</span>' : '<span class="badge draft">下書きで作る</span>') + '</div>' +
       '<div class="pl-sum"><span id="pbSum">' + bulkSumText(chosen.length) + '</span></div></div>';
     h += '<button type="button" class="link-btn" data-pb="back"' + dis + '>← 計画に戻る（作らない）</button>';
     if (bk.confirm) {
       h += '<div class="pb-confirm"><h3 class="pl-h">' + chosen.length + '件作ります</h3>' +
         '<p>' + esc(bk.name) + '（' + esc((BULK_TYPES.filter(function (t) { return t[0] === bk.type; })[0] || ['', ''])[1]) + (bk.venue ? '・' + esc(bk.venue) : '') + '・' +
-        (bk.allDay ? '終日' : esc(bk.startTime + '–' + bk.endTime)) + '）をすべて「下書き」で作ります。</p>' +
+        (bk.allDay ? '終日' : esc(bk.startTime + '–' + bk.endTime)) + '）をすべて「' + (mkConf ? '確定' : '下書き') + '」で作ります。</p>' +
+        '<fieldset class="pb-status"><legend>作るときの状態</legend>' +
+        '<label><input type="radio" name="pbStatus" data-pb="status" value="下書き"' + (mkConf ? '' : ' checked') + dis + '> 下書きで作る（管理者だけに見える）</label>' +
+        '<label><input type="radio" name="pbStatus" data-pb="status" value="確定"' + (mkConf ? ' checked' : '') + dis + '> 確定で作る（スタッフ・家族に見える）</label></fieldset>' +
         '<ol class="pb-confirm-list">' + chosen.map(function (d) {
           return '<li>' + esc(longDate(d)) + (bulkSame(bk, d) ? ' <span class="badge tent">同じ名前の予定あり</span>' : '') +
             '<div class="pb-asg' + (bulkDayChanged(bk, d) ? ' changed' : '') + '">' + esc(bulkDayText(bk, d)) + '</div></li>';
         }).join('') + '</ol>' +
-        '<div class="pl-acts"><button type="button" class="primary" data-pb="create"' + dis + '>' + chosen.length + '件作る</button>' +
+        '<div class="pl-acts"><button type="button" class="primary" data-pb="create"' + dis + '>' + chosen.length + (mkConf ? '件を確定で作る' : '件作る') + '</button>' +
         '<button type="button" class="secondary" data-pb="unconfirm"' + dis + '>戻って直す</button></div>' +
-        '<p class="hint">作ったあとは1件ずつ開いて確定してください（確定は今までどおり）。MICスケジュールには書き込みません。</p></div>';
+        '<p class="hint">' + (mkConf
+          ? '確定で作ると、スタッフ・家族に見えます。参加の受付とカレンダー反映は、今までどおり「予定と担当」から始めてください（自動では始めません）。'
+          : '下書きは、あとで1件ずつ確定するか、計画タブの［下書きをまとめて確定］で確定してください。') + 'MICスケジュールには書き込みません。</p></div>';
       byId('plEditor').innerHTML = h;
       return;
     }
@@ -2569,6 +2582,106 @@
     if (b && !b.classList.contains('btn-busy')) b.textContent = 'まとめて作る（' + n + '件）';
   }
 
+  // ---------------------------------------------------------------- 下書きをまとめて確定（v43〜・城さん 2026-11-10）
+  // ★ 選んでいる期間（なければ表示中の月）にかかるアプリの下書きを一覧にし、チェックしたものを一度に確定。最初は全部にチェック。1回50件まで
+  // ★ 確定のあとは1件ずつ確定と同じ（カレンダーは「未反映」になるだけ。参加の受付・反映は始めない）
+
+  function confScope() {
+    var p = S.plan;
+    if (p.start) { var e = p.end || p.start; return { from: p.start, to: e, label: p.start === e ? longDate(p.start) : longDate(p.start) + '〜' + longDate(e) + '（選んでいる期間）' }; }
+    var ds = daysOf(S.month);
+    return { from: ds[0], to: ds[ds.length - 1], label: (+S.month.slice(0, 4)) + '年' + (+S.month.slice(5, 7)) + '月' };
+  }
+  function confDrafts() {
+    var sc = confScope();
+    return planEvents().filter(function (ev) { return ev.cal === 'アプリ' && ev.appStatus === '下書き' && ev.dates.some(function (d) { return d >= sc.from && d <= sc.to; }); });
+  }
+  function confChosen(c) { return confDrafts().filter(function (ev) { return !c.off[ev.appId]; }); }
+  function openPlanConf() {
+    S.plan.conf = { opId: newOpId(), off: {}, confirm: false };
+    S.plan.msg = null;
+    renderPlan();
+    window.scrollTo(0, 0);
+  }
+  function confWho(ev) {
+    if (ev.type === '不在') {
+      var ps = ev.appPeople || [];
+      return '不在：' + (ps.length ? S.staff.filter(function (st) { return ps.indexOf(st.staffId) >= 0; }).map(function (st) { return st.name; }).join('・') : 'なし');
+    }
+    var out = [];
+    (ev.assigned || []).forEach(function (a) { var st = S.staff.filter(function (x) { return x.staffId === a.staffId; })[0]; if (st) out.push(st.name + '（' + (ROLE_SHORT[a.role] || a.role) + '）'); });
+    return '担当：' + (out.length ? out.join('・') : '未定');
+  }
+  function renderPlanConf() {
+    var p = S.plan, c = p.conf, sc = confScope();
+    var dis = p.busy ? ' disabled' : '';
+    var all = confDrafts(), chosen = confChosen(c);
+    var h = '<div class="pl-sticky"><div><b>下書きをまとめて確定</b></div><div class="pl-sum"><span>対象：' + esc(sc.label) + '・確定する予定：' + chosen.length + '件</span></div></div>';
+    h += '<button type="button" class="link-btn" data-pc="back"' + dis + '>← 計画に戻る（確定しない）</button>';
+    var line = function (ev) {
+      return esc(evDateLabel(ev)) + ' <b>' + esc(ev.title) + '</b> <span class="badge type">' + esc(ev.type === '練習' ? '練習会' : ev.type) + '</span>' +
+        '<div class="pb-asg">' + esc(confWho(ev)) + '</div>';
+    };
+    if (c.confirm) {
+      h += '<div class="pc-confirm"><h3 class="pl-h">' + chosen.length + '件を確定します</h3><ol class="pb-confirm-list">' +
+        chosen.map(function (ev) { return '<li>' + line(ev) + '</li>'; }).join('') + '</ol>' +
+        '<div class="pl-acts"><button type="button" class="primary" data-pc="do"' + dis + '>' + chosen.length + '件を確定</button>' +
+        '<button type="button" class="secondary" data-pc="unconfirm"' + dis + '>戻って選び直す</button></div>' +
+        '<p class="hint">確定すると、スタッフ・家族に見えます。参加の受付とカレンダー反映は、今までどおり「予定と担当」から始めてください（自動では始めません）。</p></div>';
+      byId('plEditor').innerHTML = h;
+      return;
+    }
+    var loading = planMonths().some(function (m) { var e = S.events[m]; return !e || !e.data; });
+    if (!all.length) {
+      h += '<p class="hint pl-pick">' + (loading ? '予定を読み込み中…' : esc(sc.label) + 'にかかる下書きはありません。') + '</p>';
+      byId('plEditor').innerHTML = h;
+      return;
+    }
+    h += '<p class="hint">' + esc(sc.label) + 'にかかるアプリの下書きです。確定しないものはチェックを外してください。' + (p.start ? '' : '期間を選んでから開くと、その期間の下書きになります。') + '</p>' +
+      '<p class="pb-count"><b>' + chosen.length + '件</b>確定する（下書き ' + all.length + '件）' + (chosen.length > BULK_MAX ? ' <span class="ng-text">1回' + BULK_MAX + '件までです。チェックを減らしてください</span>' : '') + '</p>' +
+      '<ul class="pb-list pc-list">' + all.map(function (ev) {
+        var on = !c.off[ev.appId];
+        return '<li class="' + (on ? '' : 'off') + '"><label><input type="checkbox" data-pc="pick" value="' + esc(ev.appId) + '"' + (on ? ' checked' : '') + dis + '> ' + esc(evDateLabel(ev)) + ' <b>' + esc(ev.title) + '</b></label>' +
+          '<span class="badge type">' + esc(ev.type === '練習' ? '練習会' : ev.type) + '</span><div class="pb-asg">' + esc(confWho(ev)) + '</div></li>';
+      }).join('') + '</ul>';
+    h += '<div class="pl-acts"><button type="button" class="primary" data-pc="check"' + dis + '>確定する（' + chosen.length + '件・確認へ）</button></div>';
+    byId('plEditor').innerHTML = h;
+  }
+  function confClick(b) {
+    var p = S.plan, c = p.conf, act = b.dataset.pc;
+    if (act === 'back') { if (p.busy) return; p.conf = null; p.msg = null; renderPlan(); return; }
+    if (act === 'check') {
+      var n = confChosen(c).length;
+      if (!n) { p.msg = { kind: 'ng', text: '⚠ 確定する予定を1件以上選んでください' }; renderPlan(); return; }
+      if (n > BULK_MAX) { p.msg = { kind: 'ng', text: '⚠ 一度に確定できるのは' + BULK_MAX + '件までです（いまは' + n + '件）' }; renderPlan(); return; }
+      c.confirm = true; p.msg = null; renderPlan(); window.scrollTo(0, 0); return;
+    }
+    if (act === 'unconfirm') { c.confirm = false; renderPlan(); return; }
+    if (act === 'do') confSave();
+  }
+  function confSave() {
+    var p = S.plan, c = p.conf;
+    if (p.busy) return;
+    var evs = confChosen(c);
+    if (!evs.length || evs.length > BULK_MAX) { c.confirm = false; renderPlan(); return; }
+    p.busy = true;
+    p.msg = { kind: 'busy', text: evs.length + '件を確定しています…' };
+    renderPlan();
+    api('confirmAppEvents', { month: S.month, opId: c.opId, ids: evs.map(function (ev) { return ev.appId; }) }, 90000).then(function (r) {
+      S.events[S.month] = { status: 'ok', data: r, at: Date.now() };
+      Object.keys(S.events).forEach(function (m) { if (m !== S.month) delete S.events[m]; });
+      var sv = r.saved || { confirmed: [], skipped: [] };
+      p.conf = null;
+      p.msg = { kind: sv.skipped && sv.skipped.length ? 'busy' : 'ok', html: '✓ ' + sv.confirmed.length + '件を確定しました' +
+        (sv.skipped && sv.skipped.length ? '（' + sv.skipped.length + '件は確定できませんでした：' + esc(sv.skipped.map(function (x) { return x.id + ' ' + x.reason; }).join('、')) + '）' : '') +
+        ' <button type="button" class="mini" data-pa="goto-events">予定と担当で参加の受付・カレンダー反映へ</button>' };
+      saveCache();
+      loadCalStatus();
+    }, function (e) {
+      p.msg = { kind: 'ng', text: '⚠ 確定できませんでした：' + (/不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message) };
+    }).then(function () { p.busy = false; renderPlan(); renderEvents(); });
+  }
+
   function bulkSumText(n) { return '作る予定：' + n + '件' + (n > BULK_MAX ? '（1回' + BULK_MAX + '件まで）' : ''); }
 
   function bulkClick(b) {
@@ -2632,6 +2745,7 @@
       var w = +t.value, i = bk.wds.indexOf(w);
       if (t.checked && i < 0) bk.wds.push(w); else if (!t.checked && i >= 0) bk.wds.splice(i, 1);
     } else if (f === 'pick') { bk.pick[t.value] = t.checked; }
+    else if (f === 'status') { bk.status = t.value === '確定' ? '確定' : '下書き'; renderPlan(); return; }   // 確定で作る（v43〜）
     else if (f === 'person') {
       var pi = bk.people.indexOf(t.value);
       if (t.checked && pi < 0) bk.people.push(t.value); else if (!t.checked && pi >= 0) bk.people.splice(pi, 1);
@@ -2672,7 +2786,7 @@
     });
     var body = {
       month: S.month, opId: bk.opId, days: days, type: bk.type, name: bk.name, venue: bk.venue, allDay: !!bk.allDay,
-      startTime: bk.allDay ? '' : bk.startTime, endTime: bk.allDay ? '' : bk.endTime, memo: bk.memo
+      startTime: bk.allDay ? '' : bk.startTime, endTime: bk.allDay ? '' : bk.endTime, memo: bk.memo, status: bk.status === '確定' ? '確定' : '下書き'
     };
     p.busy = true;
     p.msg = { kind: 'busy', text: dates.length + '件作っています…' };
@@ -2684,7 +2798,11 @@
       p.bulk = null;
       p.start = dates[0]; p.end = dates[dates.length - 1]; p.pick = 'start';
       if (S.month !== dates[0].slice(0, 7) && monthsOf(S.period).indexOf(dates[0].slice(0, 7)) >= 0) S.month = dates[0].slice(0, 7);
-      p.msg = { kind: 'ok', text: '✓ ' + bk.name + '：' + n + '件を下書きで作りました（' + shortDays([dates[0]]) + (dates.length > 1 ? '〜' + shortDays([dates[dates.length - 1]]) : '') + '）。確定は1件ずつ「開く」から' };
+      var range = '（' + shortDays([dates[0]]) + (dates.length > 1 ? '〜' + shortDays([dates[dates.length - 1]]) : '') + '）';
+      p.msg = body.status === '確定'
+        ? { kind: 'ok', html: '✓ ' + esc(bk.name + '：' + n + '件を確定で作りました' + range) + ' <button type="button" class="mini" data-pa="goto-events">予定と担当で参加の受付・カレンダー反映へ</button>' }
+        : { kind: 'ok', text: '✓ ' + bk.name + '：' + n + '件を下書きで作りました' + range + '。確定は1件ずつ「開く」か［下書きをまとめて確定］から' };
+      if (body.status === '確定') loadCalStatus();
       saveCache();
     }, function (e) {
       p.msg = { kind: 'ng', text: '⚠ 作れませんでした：' + (/不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message) };
