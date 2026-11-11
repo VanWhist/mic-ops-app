@@ -516,7 +516,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261111a';
+  var APP_VERSION = '20261111b';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -2156,6 +2156,9 @@
       startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1], allDay: ev.allDay,
       startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', assign: assign, assignDays: assignDays, people: (ev.absentees || []).slice(),
       partial: ev.answers ? ev.answers.partial : undefined,
+      // 参加の回答（v45〜）：開いたときの日時と、今の回答（選手の数・家庭の数）
+      orig: { startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1], allDay: ev.allDay, startTime: t(ev.start), endTime: t(ev.end) },
+      ansStats: answerStatsOf(ev),
       lodging: ev.lodging ? { on: true, lodgingId: ev.lodging.id, nights: ev.lodging.nights.slice(), deadline: ev.lodging.deadline || '', newL: Object.assign({}, LG_EMPTY, { kind: '遠征先' }),
         unitPrice: ev.lodging.billing ? ev.lodging.billing.unitPrice : 3500, showFamily: !!(ev.lodging.billing && ev.lodging.billing.showFamily) } : undefined
     });
@@ -2218,6 +2221,11 @@
       renderPlanEditor();
     } else if (act === 'save') {
       savePlan(b.dataset.status);
+    } else if (act === 'ans-go') {   // 参加の回答の扱いを選んで保存（v45〜）
+      var ask = p.ed && p.ed.ansAsk;
+      if (ask) savePlan(ask.status, ask.mode);
+    } else if (act === 'ans-back') {
+      if (p.ed) { p.ed.ansAsk = null; renderPlanEditor(); }
     } else if (act === 'delete') {
       if (p.busy || !window.confirm('この下書きを消します。よろしいですか？（担当も消えます）')) return;
       planOp('deleteAppEvent', { id: p.ed.id }, '下書きを消しました');
@@ -2229,10 +2237,15 @@
   function planChange(e) {
     var t = e.target, p = S.plan;
     if (p.bulk) { bulkChange(t); return; }   // まとめて登録（v41〜）
-    if (p.req) { if (t.dataset.pq === 'pick') { p.req.pick[t.value] = t.checked; renderPlanReq(); } return; }   // Coworkからの依頼（v44〜）
+    if (p.req) {
+      if (t.dataset.pq === 'pick') { p.req.pick[t.value] = t.checked; renderPlanReq(); }
+      else if (t.dataset.pq === 'ans') { p.req.ansModes[t.dataset.id] = t.value === 'keep' ? 'keep' : 'recheck'; }   // v45〜
+      return;
+    }   // Coworkからの依頼（v44〜）
     if (p.conf) { if (t.dataset.pc === 'pick') { p.conf.off[t.value] = !t.checked; renderPlanConf(); } return; }   // まとめて確定（v43〜）
     if (planLodgingChange(t)) return;   // 宿泊（v21〜）
     if (t.name === 'plView') { p.view = t.value; renderPlan(); return; }
+    if (t.name === 'ansMode' && p.ed && p.ed.ansAsk) { p.ed.ansAsk.mode = t.value === 'keep' ? 'keep' : 'recheck'; return; }   // v45〜
     if (t.dataset.pd) {
       var v = t.value;
       if (!inPeriodDate(v)) { renderPlan(); return; }
@@ -2245,6 +2258,7 @@
     var f = t.dataset.ed;
     if (!f || !p.ed) return;
     var ed = p.ed;
+    ed.ansAsk = null;   // 中身を直したら、回答の扱いは保存のときに聞き直す（v45〜）
     if (f === 'allDay') ed.allDay = t.checked;
     else if (f === 'partial') { ed.partial = t.checked; return; }
     else if (f === 'person') {
@@ -2319,6 +2333,17 @@
     h += hasDates ? planLodgingHtml(ed) : (PARTIAL_DEFAULT.hasOwnProperty(ed.type) ? '<h3 class="pl-h">宿泊</h3><p class="hint">日付を選ぶと宿泊を設定できます。</p>' : '');   // 宿泊（v21〜）。担当の下に置く
     // ボタン
     var dis = p.busy ? ' disabled' : '';
+    if (ed.ansAsk) {   // 参加の回答がある予定の日時を変える（v45〜）
+      var ak = ed.ansAsk, st0 = ed.ansStats;
+      h += '<div class="ans-ask" role="group" aria-label="参加の回答の扱い"><p><b>この予定には参加の回答が' + st0.athletes + '件（' + st0.families + '家庭）あります。</b><br>' +
+        (ak.kind === 'dates' ? '日付が変わります。' : '時刻・終日だけが変わります（日付は同じ）。') + '回答をどうしますか？</p>' +
+        '<label><input type="radio" name="ansMode" value="keep"' + (ak.mode === 'keep' ? ' checked' : '') + dis + '> 回答を残す（今の回答を新しい日時のものとして扱う。予定から外れた日の回答は外す）</label>' +
+        '<label><input type="radio" name="ansMode" value="recheck"' + (ak.mode === 'recheck' ? ' checked' : '') + dis + '> 答え直してもらう（家族に「要確認」と出て、もう一度答えてもらう）</label>' +
+        '<div class="pl-acts"><button type="button" class="primary" data-pa="ans-go"' + dis + '>この内容で保存</button>' +
+        '<button type="button" class="secondary" data-pa="ans-back"' + dis + '>戻る</button></div></div>';
+      byId('plEditor').innerHTML = h;
+      return;
+    }
     h += '<div class="pl-acts">';
     if (isNew || ed.status === '下書き') {
       h += '<button type="button" class="secondary" data-pa="save" data-status="下書き"' + dis + '>下書き保存</button>' +
@@ -2610,6 +2635,7 @@
     var q = S.plan.req;
     q.items = items;
     q.pick = {};
+    q.ansModes = {};   // 回答の扱い（v45〜。選ばなければ初期値）
     items.forEach(function (it) { if (!it.dup) q.pick[it.id] = !!it.ok; });   // 検査に通ったものだけ最初からチェック
   }
   function staffNm(id) { var st = S.staff.filter(function (x) { return x.staffId === id; })[0]; return st ? st.name : id; }
@@ -2645,9 +2671,19 @@
           '<p class="pq-sub muted">' + esc(a.who + '／' + (a.status === '確定' ? '確定で作る' : '下書きで作る') + (a.memo !== 'なし' ? '／メモ：' + a.memo : '')) + '</p>';
       }
     }
+    if (it.answers) {   // 参加の回答がある予定の日時を変える依頼（v45〜）
+      var an = it.answers, md = reqAnsMode(it);
+      h += '<div class="pq-ans"><span class="badge tent">参加の回答 ' + an.athletes + '件（' + an.families + '家庭）</span> ' +
+        (an.kind === 'dates' ? '日付が変わります' : '時刻・終日だけ変わります');
+      h += withPick ? '：' + (md === 'keep' ? '回答を残す' : '答え直してもらう') + '（確認の画面で変えられます）'
+        : '<label><input type="radio" name="pqAns-' + esc(it.id) + '" data-pq="ans" data-id="' + esc(it.id) + '" value="keep"' + (md === 'keep' ? ' checked' : '') + dis + '> 回答を残す</label>' +
+          '<label><input type="radio" name="pqAns-' + esc(it.id) + '" data-pq="ans" data-id="' + esc(it.id) + '" value="recheck"' + (md === 'recheck' ? ' checked' : '') + dis + '> 答え直してもらう</label>';
+      h += '</div>';
+    }
     if (it.errors && it.errors.length) h += '<ul class="pq-err">' + it.errors.map(function (e) { return '<li>⚠ ' + esc(e) + '</li>'; }).join('') + '</ul>';
     return h + '</li>';
   }
+  function reqAnsMode(it) { var q = S.plan.req; return (q.ansModes && q.ansModes[it.id]) || (it.answers ? it.answers.defaultMode : ''); }
   function reqChosen() { var q = S.plan.req; return q.items.filter(function (it) { return !it.dup && q.pick[it.id]; }); }
   function renderPlanReq() {
     var p = S.plan, q = p.req, dis = p.busy ? ' disabled' : '';
@@ -2702,10 +2738,12 @@
     var p = S.plan, q = p.req;
     if (p.busy) return;
     var ids = reqChosen().map(function (it) { return it.id; });
+    var modes = {};
+    reqChosen().forEach(function (it) { if (it.answers) modes[it.id] = reqAnsMode(it); });
     p.busy = true;
     p.msg = { kind: 'busy', text: ids.length + '件を' + (mode === 'import' ? '取り込んでいます…' : '却下しています…') };
     renderPlan();
-    api('planRequestsApply', { month: S.month, opId: q.opId, mode: mode, ids: ids }, 120000).then(function (r) {
+    api('planRequestsApply', { month: S.month, opId: q.opId, mode: mode, ids: ids, answerModes: modes }, 120000).then(function (r) {
       S.events[S.month] = { status: 'ok', data: r, at: Date.now() };
       Object.keys(S.events).forEach(function (m) { if (m !== S.month) delete S.events[m]; });
       var res = r.results || [], okN = res.filter(function (x) { return x.ok; }).length;
@@ -2958,13 +2996,38 @@
       .sort(function (a, b) { return rank[a.c.cat] - rank[b.c.cat] || b.c.o - a.c.o || b.c.t - a.c.t || a.i - b.i; });
   }
 
-  function savePlan(status) {
+  /** 今の参加の回答（v45〜）：今の日時の回答がある選手の数と家庭の数（答え直し待ちは数えない） */
+  function answerStatsOf(ev) {
+    var by = (ev.answers && ev.answers.byAthlete) || {}, ids = Object.keys(by), fam = {};
+    ids.forEach(function (id) { var a = (S.athletes || []).filter(function (x) { return x.athleteId === id; })[0]; fam[(a && a.familyId) || id] = true; });
+    return { athletes: ids.length, families: Object.keys(fam).length };
+  }
+  /** 日時の変わり方：'dates'（日付が変わる）／'time'（時刻・終日だけ）／''（変わらない） */
+  function planDateChange(ed) {
+    var o = ed.orig;
+    if (!o) return '';
+    if (o.startDate !== ed.startDate || o.endDate !== ed.endDate) return 'dates';
+    if (!!o.allDay !== !!ed.allDay) return 'time';
+    if (!ed.allDay && (o.startTime !== ed.startTime || o.endTime !== ed.endTime)) return 'time';
+    return '';
+  }
+
+  function savePlan(status, answerMode) {
     var p = S.plan, ed = p.ed;
     if (p.busy) return;
     if (!String(ed.name || '').trim()) { p.msg = { kind: 'ng', text: '⚠ 名前を入れてください' }; renderPlan(); return; }
     if (!edHasDates(ed)) { p.msg = { kind: 'ng', text: '⚠ 開始日と終了日を選んでください' }; renderPlan(); return; }
     if (!ed.allDay && (!ed.startTime || !ed.endTime)) { p.msg = { kind: 'ng', text: '⚠ 時刻を入れるか、「終日」にしてください' }; renderPlan(); return; }
     if (status === '中止' && ed.status !== '中止' && !window.confirm('この予定を中止にします。\nカレンダーからは次の反映で消え、家族にも出なくなります。よろしいですか？')) return;
+    // 参加の回答がある予定の日時を変えるとき：回答を残すか、答え直してもらうかを選んでから保存（v45〜）
+    var chg = ed.id ? planDateChange(ed) : '';
+    if (chg && ed.ansStats && ed.ansStats.athletes && !answerMode) {
+      ed.ansAsk = { status: status, kind: chg, mode: chg === 'dates' ? 'recheck' : 'keep' };
+      renderPlanEditor();
+      var box = document.querySelector('#plEditor .ans-ask');
+      if (box && box.scrollIntoView) box.scrollIntoView({ block: 'center' });
+      return;
+    }
     var roles = ROLES_BY_TYPE[ed.type] || [];
     var assignments = [];
     var dts = datesBetween(ed.startDate, ed.endDate);
@@ -2978,9 +3041,12 @@
       status: status, memo: ed.memo, assignments: ed.type === '不在' ? [] : assignments, people: ed.type === '不在' ? ed.people : []
     };
     if (PARTIAL_DEFAULT.hasOwnProperty(ed.type)) body.partial = planPartial(ed);
+    if (answerMode === 'keep' || answerMode === 'recheck') body.answerMode = answerMode;
     try { var lgBody = planLodgingBody(ed); } catch (err) { p.msg = { kind: 'ng', text: '⚠ ' + err.message }; renderPlan(); return; }
     if (lgBody !== undefined) body.lodging = lgBody;
-    var label = status === '下書き' ? '下書きで保存しました' : status === '中止' ? '中止にしました' : '確定しました';
+    var label = (status === '下書き' ? '下書きで保存しました' : status === '中止' ? '中止にしました' : '確定しました') +
+      (body.answerMode ? '（参加の回答は' + (body.answerMode === 'keep' ? '残しました' : '答え直してもらいます') + '）' : '');
+    ed.ansAsk = null;
     planOp('saveAppEvent', body, label, status === '確定');
   }
 

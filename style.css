@@ -822,3 +822,11 @@ button.btn-busy { opacity: .6; cursor: progress; pointer-events: none; }
 .pq-results ul { list-style: none; margin: 0 0 10px; padding: 0; }
 .pq-results li { padding: 3px 0; font-size: 14px; overflow-wrap: anywhere; }
 .pq-results li.ok { color: var(--o); } .pq-results li.ng { color: var(--ng); }
+/* 参加の回答がある予定の日時を変えるとき（v45〜） */
+.ans-ask { border: 2px solid var(--t); background: var(--t-bg); border-radius: 8px; padding: 10px 12px; margin: 12px 0; }
+.ans-ask p { margin: 0 0 6px; }
+.ans-ask label { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; font-size: 15px; }
+.ans-ask input { width: 22px; height: 22px; flex: none; margin-top: 1px; }
+.pq-ans { margin: 4px 0 0 28px; font-size: 14px; }
+.pq-ans label { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; margin-right: 12px; }
+.pq-ans input { width: 20px; height: 20px; }
