@@ -192,7 +192,7 @@
   //   読むだけの操作と、同じ内容で上書きする保存（○△×・役割・ピン）。トークの書き込み・Haiku君・反映などは送り直さない
   var API_RETRY = {
     bootstrap: 1, events: 1, upcoming: 1, inputEvents: 1, talkSummary: 1, talkGet: 1, calStatus: 1, calShares: 1, calShareList: 1,
-    staffList: 1, familyList: 1, deaconList: 1, lodgingList: 1, aiSuggestions: 1,
+    staffList: 1, familyList: 1, deaconList: 1, lodgingList: 1, aiSuggestions: 1, planRequestsList: 1,
     saveDays: 1, saveRoles: 1, talkPin: 1
   };
   var API_RETRY_MS = 800;
@@ -250,7 +250,7 @@
   // ★ ○△×のタップは止めない（マスに小さく「…」→「✓」。上の「保存中…／保存しました」もそのまま）
   var BTN_READ = {
     bootstrap: 1, events: 1, upcoming: 1, inputEvents: 1, talkSummary: 1, talkGet: 1, calStatus: 1, calShares: 1, calShareList: 1,
-    staffList: 1, familyList: 1, deaconList: 1, lodgingList: 1, aiSuggestions: 1, saveDays: 1
+    staffList: 1, familyList: 1, deaconList: 1, lodgingList: 1, aiSuggestions: 1, saveDays: 1, planRequestsList: 1
   };
   var BTN_WORDS = {
     talkPin: ['…', null], talkSummarize: ['まとめ中…', null], aiAsk: ['送信中…', null], aiSuggestionRead: ['変更中…', null],
@@ -261,7 +261,8 @@
     setActive: ['変更中…', '変更しました'], familySetActive: ['変更中…', '変更しました'], athleteSetActive: ['変更中…', '変更しました'],
     setReplaced: ['変更中…', '変更しました'], deaconConfirm: ['確定中…', '確定しました'],
     saveAppEventsBulk: ['作成中…', '作りました'],   // まとめて登録（v41〜）
-    confirmAppEvents: ['確定中…', '確定しました']   // 下書きをまとめて確定（v43〜）
+    confirmAppEvents: ['確定中…', '確定しました'],   // 下書きをまとめて確定（v43〜）
+    planRequestsApply: ['処理中…', null]   // Coworkからの依頼（v44〜。結果は一覧の上に出す）
   };
   var BTN_OK_MS = 2500, BTN_NG_MS = 10000;
   var btnPressed = null, btnBusy = [], btnFlash = [], btnApplying = false;
@@ -515,7 +516,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261110c';
+  var APP_VERSION = '20261111a';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -2026,9 +2027,10 @@
     else if (!cur || cur.status === 'loading') { st.textContent = '予定を読み込み中…'; st.className = 'ev-status busy'; }
     else if (cur.status === 'error') { st.textContent = '⚠ 予定を読み込めませんでした：' + cur.error; st.className = 'ev-status ng'; }
     else { st.textContent = ''; st.className = 'ev-status'; }
-    var editing = !!p.ed || !!p.bulk || !!p.conf;
+    var editing = !!p.ed || !!p.bulk || !!p.conf || !!p.req;
     byId('plMain').hidden = editing;
     byId('plEditor').hidden = !editing;
+    if (p.req) { renderPlanReq(); return; }   // Coworkからの依頼（v44〜）
     if (p.conf) { renderPlanConf(); return; }   // 下書きをまとめて確定（v43〜）
     if (p.bulk) {
       // 名前・メモを打っている途中に予定の読み込みが終わったら、入力欄はそのまま（日の一覧と印だけ描き直す）
@@ -2167,6 +2169,8 @@
   }
 
   function planClick(e) {
+    var pq = e.target.closest('[data-pq]');
+    if (pq && pq.tagName === 'BUTTON' && S.plan.req) { if (!pq.disabled) reqClick(pq); return; }   // Coworkからの依頼（v44〜）
     var pc = e.target.closest('[data-pc]');
     if (pc && pc.tagName === 'BUTTON' && S.plan.conf) { if (!pc.disabled) confClick(pc); return; }   // 下書きをまとめて確定（v43〜）
     var pb = e.target.closest('[data-pb]');
@@ -2181,6 +2185,8 @@
     } else if (act === 'dup') {
       if (p.busy) return;
       planDuplicate();
+    } else if (act === 'requests') {
+      openPlanReq();
     } else if (act === 'confirm-drafts') {
       openPlanConf();
     } else if (act === 'bulk') {
@@ -2223,6 +2229,7 @@
   function planChange(e) {
     var t = e.target, p = S.plan;
     if (p.bulk) { bulkChange(t); return; }   // まとめて登録（v41〜）
+    if (p.req) { if (t.dataset.pq === 'pick') { p.req.pick[t.value] = t.checked; renderPlanReq(); } return; }   // Coworkからの依頼（v44〜）
     if (p.conf) { if (t.dataset.pc === 'pick') { p.conf.off[t.value] = !t.checked; renderPlanConf(); } return; }   // まとめて確定（v43〜）
     if (planLodgingChange(t)) return;   // 宿泊（v21〜）
     if (t.name === 'plView') { p.view = t.value; renderPlan(); return; }
@@ -2580,6 +2587,139 @@
     var n = bulkChosen(bk).length, b = document.querySelector('[data-pb="confirm"]'), sm = byId('pbSum');
     if (sm) sm.textContent = bulkSumText(n);
     if (b && !b.classList.contains('btn-busy')) b.textContent = 'まとめて作る（' + n + '件）';
+  }
+
+  // ---------------------------------------------------------------- Coworkからの依頼（v44〜・城さん確定 2026-11-11）
+  // ★ Cowork が plan_requests シートに書いた依頼（未処理）を一覧にし、チェックしたものを［取り込む］か［却下］。依頼の行だけでは何も変わらない
+  // ★ 検査に通らない依頼は理由を出し、最初はチェックを外す（取り込むと「要修正」と理由がシートに戻る）。1回50件まで
+  // ★ 取り込みのあとは1件ずつ保存したときと同じ。参加の受付・カレンダー反映は始めない
+
+  var REQ_FIELDS = [['type', '種類'], ['name', '名前'], ['venue', '会場'], ['dates', '日付'], ['time', '時間'], ['who', '担当'], ['memo', 'メモ'], ['status', '状態']];
+  function openPlanReq() {
+    var p = S.plan;
+    p.req = { status: 'loading', items: [], pick: {}, confirm: false, opId: newOpId(), results: null };
+    p.msg = null;
+    renderPlan();
+    window.scrollTo(0, 0);
+    api('planRequestsList', {}).then(function (r) { reqSetItems(r.items || []); p.req.status = 'ok'; }, function (e) {
+      p.req.status = 'error';
+      p.msg = { kind: 'ng', text: '⚠ 依頼を読めませんでした：' + (/不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message) };
+    }).then(function () { if (S.plan.req) renderPlan(); });
+  }
+  function reqSetItems(items) {
+    var q = S.plan.req;
+    q.items = items;
+    q.pick = {};
+    items.forEach(function (it) { if (!it.dup) q.pick[it.id] = !!it.ok; });   // 検査に通ったものだけ最初からチェック
+  }
+  function staffNm(id) { var st = S.staff.filter(function (x) { return x.staffId === id; })[0]; return st ? st.name : id; }
+  /** 予定の中身を項目ごとの文字に（変更前・変更後で同じ形） */
+  function reqText(o) {
+    if (!o) return {};
+    var tp = (PLAN_TYPES.filter(function (t) { return t[0] === o.type; })[0] || [o.type, o.type])[1];
+    var sd = o.startDate ? shortDays([o.startDate]) : '—', ed = o.endDate && o.endDate !== o.startDate ? '〜' + shortDays([o.endDate]) : '';
+    var who = o.type === '不在'
+      ? '不在：' + ((o.people || []).length ? o.people.map(staffNm).join('・') : 'なし')
+      : ((o.assignments || []).length ? o.assignments.map(function (a) {
+        var multi = o.startDate !== o.endDate;
+        return staffNm(a.staffId) + '（' + (ROLE_SHORT[a.role] || a.role) + (multi && a.days ? '・' + shortDays(a.days) : '') + '）';
+      }).join('・') : '未定');
+    return { type: tp, name: o.name || '', venue: o.venue || 'なし', dates: sd + ed, time: o.allDay ? '終日' : (o.startTime + '–' + o.endTime), who: who, memo: o.memo || 'なし', status: o.status || '' };
+  }
+  function reqItemHtml(it, withPick, dis) {
+    var q = S.plan.req, on = !!q.pick[it.id];
+    var h = '<li class="pq-item' + (it.ok ? '' : ' ng') + (withPick && !on ? ' off' : '') + '">';
+    var head = '<b>' + esc(it.id || '（依頼IDなし）') + '</b> <span class="badge ' + (it.op === '変更' ? 'tent' : 'app') + '">' + esc(it.op || '?') + '</span>' +
+      (it.target ? ' <span class="muted">' + esc(it.target) + '</span>' : '') + (it.at ? ' <small class="muted">' + esc(it.at.slice(0, 16)) + '</small>' : '');
+    h += withPick && !it.dup ? '<label><input type="checkbox" data-pq="pick" value="' + esc(it.id) + '"' + (on ? ' checked' : '') + dis + '> ' + head + '</label>' : '<div>' + head + '</div>';
+    var a = reqText(it.after), b = it.before ? reqText(it.before) : null;
+    if (a.name !== undefined) {
+      if (it.op === '変更' && b) {
+        var lines = REQ_FIELDS.filter(function (f) { return a[f[0]] !== b[f[0]]; });
+        h += '<dl class="pq-diff">' + (lines.length ? lines.map(function (f) {
+          return '<dt>' + f[1] + '</dt><dd><s>' + esc(b[f[0]]) + '</s> → <b>' + esc(a[f[0]]) + '</b></dd>';
+        }).join('') : '<dd class="muted">変わるところがありません</dd>') + '</dl>' +
+          '<p class="pq-sub muted">' + esc(b.dates + '・' + b.name) + '</p>';
+      } else {
+        h += '<p class="pq-sub">' + esc(a.dates + '　' + a.name + '（' + a.type + '・' + a.time + (a.venue !== 'なし' ? '・' + a.venue : '') + '）') + '</p>' +
+          '<p class="pq-sub muted">' + esc(a.who + '／' + (a.status === '確定' ? '確定で作る' : '下書きで作る') + (a.memo !== 'なし' ? '／メモ：' + a.memo : '')) + '</p>';
+      }
+    }
+    if (it.errors && it.errors.length) h += '<ul class="pq-err">' + it.errors.map(function (e) { return '<li>⚠ ' + esc(e) + '</li>'; }).join('') + '</ul>';
+    return h + '</li>';
+  }
+  function reqChosen() { var q = S.plan.req; return q.items.filter(function (it) { return !it.dup && q.pick[it.id]; }); }
+  function renderPlanReq() {
+    var p = S.plan, q = p.req, dis = p.busy ? ' disabled' : '';
+    var chosen = reqChosen();
+    var h = '<div class="pl-sticky"><div><b>Coworkからの依頼</b> <small class="muted">plan_requests シートの「未処理」</small></div>' +
+      '<div class="pl-sum"><span>選んだ依頼：' + chosen.length + '件</span></div></div>';
+    h += '<button type="button" class="link-btn" data-pq="back"' + dis + '>← 計画に戻る</button>';
+    if (q.results) {
+      h += '<div class="pq-results"><h3 class="pl-h">結果</h3><ul>' + q.results.map(function (x) {
+        return '<li class="' + (x.ok ? 'ok' : 'ng') + '">' + (x.ok ? '✓ ' : '⚠ ') + esc(x.id) + '：' + esc(x.memo) + '</li>';
+      }).join('') + '</ul></div>';
+    }
+    if (q.confirm) {
+      var bad = chosen.filter(function (it) { return !it.ok; }).length;
+      h += '<div class="pq-confirm"><h3 class="pl-h">' + chosen.length + '件を取り込みます</h3><ol class="pq-list">' + chosen.map(function (it) { return reqItemHtml(it, false, dis); }).join('') + '</ol>' +
+        (bad ? '<p class="warn">⚠ ' + bad + '件は検査に通っていません。取り込まずに「要修正」と理由をシートに書き戻します。</p>' : '') +
+        '<div class="pl-acts"><button type="button" class="primary" data-pq="do"' + dis + '>' + chosen.length + '件を取り込む</button>' +
+        '<button type="button" class="secondary" data-pq="unconfirm"' + dis + '>戻って選び直す</button></div>' +
+        '<p class="hint">取り込むと予定を作る・直します。参加の受付とカレンダー反映は、今までどおり「予定と担当」から始めてください（自動では始めません）。</p></div>';
+      byId('plEditor').innerHTML = h;
+      return;
+    }
+    if (q.status === 'loading') h += '<p class="hint pl-pick">依頼を読み込み中…</p>';
+    else if (q.status === 'ok' && !q.items.length) h += '<p class="hint pl-pick">未処理の依頼はありません。</p>';
+    else if (q.items.length) {
+      h += '<p class="pb-count"><b>' + chosen.length + '件</b>選択（未処理 ' + q.items.length + '件）' + (chosen.length > BULK_MAX ? ' <span class="ng-text">1回' + BULK_MAX + '件までです</span>' : '') + '</p>' +
+        '<ul class="pq-list">' + q.items.map(function (it) { return reqItemHtml(it, true, dis); }).join('') + '</ul>' +
+        '<div class="pl-acts"><button type="button" class="primary" data-pq="check"' + dis + '>取り込む（' + chosen.length + '件・確認へ）</button>' +
+        '<button type="button" class="secondary" data-pq="reject"' + dis + '>却下（' + chosen.length + '件）</button>' +
+        '<button type="button" class="link-btn" data-pq="reload"' + dis + '>読み直す</button></div>' +
+        '<p class="hint">検査に通らなかった依頼は、最初はチェックを外しています。チェックして取り込むと、取り込まずに「要修正」と理由をシートに書き戻します（Cowork が直して「未処理」に戻すと、また出ます）。</p>';
+    }
+    byId('plEditor').innerHTML = h;
+  }
+  function reqClick(b) {
+    var p = S.plan, q = p.req, act = b.dataset.pq;
+    if (act === 'back') { if (p.busy) return; p.req = null; p.msg = null; renderPlan(); return; }
+    if (act === 'reload') { openPlanReq(); return; }
+    var n = reqChosen().length;
+    if (act === 'check' || act === 'reject') {
+      if (!n) { p.msg = { kind: 'ng', text: '⚠ 依頼を1件以上選んでください' }; renderPlan(); return; }
+      if (n > BULK_MAX) { p.msg = { kind: 'ng', text: '⚠ 一度に処理できるのは' + BULK_MAX + '件までです（いまは' + n + '件）' }; renderPlan(); return; }
+      if (act === 'check') { q.confirm = true; p.msg = null; renderPlan(); window.scrollTo(0, 0); return; }
+      if (!window.confirm(n + '件の依頼を却下します。予定は変わりません。よろしいですか？')) return;
+      reqApply('reject');
+      return;
+    }
+    if (act === 'unconfirm') { q.confirm = false; renderPlan(); return; }
+    if (act === 'do') reqApply('import');
+  }
+  function reqApply(mode) {
+    var p = S.plan, q = p.req;
+    if (p.busy) return;
+    var ids = reqChosen().map(function (it) { return it.id; });
+    p.busy = true;
+    p.msg = { kind: 'busy', text: ids.length + '件を' + (mode === 'import' ? '取り込んでいます…' : '却下しています…') };
+    renderPlan();
+    api('planRequestsApply', { month: S.month, opId: q.opId, mode: mode, ids: ids }, 120000).then(function (r) {
+      S.events[S.month] = { status: 'ok', data: r, at: Date.now() };
+      Object.keys(S.events).forEach(function (m) { if (m !== S.month) delete S.events[m]; });
+      var res = r.results || [], okN = res.filter(function (x) { return x.ok; }).length;
+      q.results = res;
+      q.confirm = false;
+      q.opId = newOpId();
+      reqSetItems(r.requests || []);
+      p.msg = { kind: okN === res.length ? 'ok' : 'busy', html: '✓ ' + (mode === 'import' ? '取り込み' : '却下') + '：' + okN + '件' + (okN < res.length ? '・できなかったもの ' + (res.length - okN) + '件（下の結果）' : '') +
+        (mode === 'import' && okN ? ' <button type="button" class="mini" data-pa="goto-events">予定と担当で参加の受付・カレンダー反映へ</button>' : '') };
+      saveCache();
+      if (mode === 'import' && okN) loadCalStatus();
+    }, function (e) {
+      p.msg = { kind: 'ng', text: '⚠ 処理できませんでした：' + (/不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message) };
+    }).then(function () { p.busy = false; renderPlan(); renderEvents(); window.scrollTo(0, 0); });
   }
 
   // ---------------------------------------------------------------- 下書きをまとめて確定（v43〜・城さん 2026-11-10）

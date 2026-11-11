@@ -805,3 +805,20 @@ button.btn-busy { opacity: .6; cursor: progress; pointer-events: none; }
 .pb-status input { width: 22px; height: 22px; }
 .pc-list li label { flex: 1 1 auto; }
 .pc-list .badge, .pb-confirm-list .badge { white-space: nowrap; }
+/* Coworkからの依頼（v44〜） */
+.pq-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; }
+.pq-item { padding: 8px 10px; border-top: 1px solid var(--line); }
+.pq-item:first-child { border-top: 0; }
+.pq-item.off { color: var(--muted); }
+.pq-item.ng { background: var(--ng-bg); }
+.pq-item label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-height: 36px; }
+.pq-item input { width: 22px; height: 22px; }
+.pq-item .badge { white-space: nowrap; }
+.pq-sub { margin: 2px 0 0 28px; font-size: 14px; overflow-wrap: anywhere; }
+.pq-diff { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 4px 0 0 28px; font-size: 14px; }
+.pq-diff dt { color: var(--muted); }
+.pq-diff dd { margin: 0; overflow-wrap: anywhere; }
+.pq-err { margin: 4px 0 0 28px; padding: 0; list-style: none; color: var(--ng); font-size: 13px; }
+.pq-results ul { list-style: none; margin: 0 0 10px; padding: 0; }
+.pq-results li { padding: 3px 0; font-size: 14px; overflow-wrap: anywhere; }
+.pq-results li.ok { color: var(--o); } .pq-results li.ng { color: var(--ng); }
