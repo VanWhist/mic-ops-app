@@ -1926,9 +1926,9 @@
     tab.addEventListener('change', planChange);
     tab.addEventListener('input', function (e) {
       var f = e.target.dataset && e.target.dataset.ed;
-      if (f && S.plan.ed && (f === 'name' || f === 'memo')) S.plan.ed[f] = e.target.value;
+      if (f && S.plan.ed && (f === 'name' || f === 'memo' || f === 'calDesc')) S.plan.ed[f] = e.target.value;
       var fb = e.target.dataset && e.target.dataset.pb;   // まとめて登録（v41〜）：打つたびに同じ名前の印を付け直す
-      if (fb && S.plan.bulk && (fb === 'name' || fb === 'memo')) { S.plan.bulk[fb] = e.target.value; if (fb === 'name') renderBulkDates(); }
+      if (fb && S.plan.bulk && (fb === 'name' || fb === 'memo' || fb === 'calDesc')) { S.plan.bulk[fb] = e.target.value; if (fb === 'name') renderBulkDates(); }
     });
   }
 
@@ -2154,7 +2154,7 @@
     openPlanEditor({
       id: ev.appId, status: ev.appStatus, type: ev.type, name: ev.title, venue: ev.venue || '',
       startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1], allDay: ev.allDay,
-      startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', assign: assign, assignDays: assignDays, people: (ev.absentees || []).slice(),
+      startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', calDesc: ev.calDesc || '', assign: assign, assignDays: assignDays, people: (ev.absentees || []).slice(),
       partial: ev.answers ? ev.answers.partial : undefined,
       // 参加の回答（v45〜）：開いたときの日時と、今の回答（選手の数・家庭の数）
       orig: { startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1], allDay: ev.allDay, startTime: t(ev.start), endTime: t(ev.end) },
@@ -2300,7 +2300,8 @@
       (PARTIAL_DEFAULT.hasOwnProperty(ed.type) ? '<label class="chk"><input type="checkbox" data-ed="partial"' + (planPartial(ed) ? ' checked' : '') + '> 家族の参加の回答で、時間の指定を受け付ける</label>' : '') +
       (ed.allDay ? '' : '<div class="pl-dates"><label>開始時刻 <input type="time" step="300" data-ed="startTime" value="' + esc(ed.startTime) + '"></label>' +
         '<label>終了時刻 <input type="time" step="300" data-ed="endTime" value="' + esc(ed.endTime) + '"></label></div>') +
-      '<label>スタッフ向けメモ <textarea data-ed="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(ed.memo) + '</textarea></label></div>';
+      '<label>スタッフ向けメモ <textarea data-ed="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(ed.memo) + '</textarea></label>' +
+      calDescField('ed', ed.calDesc) + '</div>';
     // 担当（または不在の人）
     var cands = staffCands(dates);
     if (ed.type === '不在') {
@@ -2366,6 +2367,13 @@
     byId('plEditor').innerHTML = h;
   }
 
+  /** カレンダーの説明（v45〜）：Googleカレンダー「MIC 予定（アプリ）」の説明の一番上に出る。家族にも見える。500字まで */
+  var CAL_DESC_MAX = 500;
+  function calDescField(attr, v) {
+    return '<label>カレンダーの説明（家族にも見えます） <textarea data-' + attr + '="calDesc" maxlength="' + CAL_DESC_MAX + '" rows="3" placeholder="Googleカレンダーの説明の一番上に出ます（例：集合はゲート前／雨なら中止）">' + esc(v || '') + '</textarea>' +
+      '<small class="muted">下に担当・参加の人などが自動で続きます。スタッフ向けメモはカレンダーに出ません。</small></label>';
+  }
+
   function edHasDates(ed) { return !!(ed && inPeriodDate(ed.startDate || '') && inPeriodDate(ed.endDate || '')); }
 
   // ---------------------------------------------------------------- 複製とまとめて登録（v41〜・城さん決定 2026-11-09）
@@ -2387,7 +2395,7 @@
     Object.keys(src.assign || {}).forEach(function (k) { if ((src.assign[k] || []).length) assign[k] = src.assign[k].slice(); });
     openPlanEditor({
       id: null, status: '', dup: true, type: src.type, name: src.name, venue: src.venue || '', startDate: '', endDate: '',
-      allDay: !!src.allDay, startTime: src.allDay ? '' : src.startTime, endTime: src.allDay ? '' : src.endTime, memo: src.memo || '',
+      allDay: !!src.allDay, startTime: src.allDay ? '' : src.startTime, endTime: src.allDay ? '' : src.endTime, memo: src.memo || '', calDesc: src.calDesc || '',
       assign: assign, assignDays: {}, people: (src.people || []).slice()
     });
     S.plan.msg = { kind: 'ok', text: '「' + src.name + '」を複製しました。日付を選んで保存してください（まだ保存していません）' };
@@ -2401,7 +2409,7 @@
     if (!inPeriod(to)) to = periodLastDay();
     p.bulk = {
       opId: newOpId(), from: from, to: to, wds: [], add: [], drop: [], pick: {}, confirm: false, calMonth: from.slice(0, 7),
-      type: '練習', name: '', venue: '', allDay: true, startTime: '', endTime: '', memo: '', assign: {}, people: [], status: '下書き',
+      type: '練習', name: '', venue: '', allDay: true, startTime: '', endTime: '', memo: '', calDesc: '', assign: {}, people: [], status: '下書き',
       dayAssign: {}, dayPeople: {}, openDay: null   // 日ごとの担当・不在の人（v42〜。無い日は共通のまま）
     };
     if (seed) Object.keys(seed).forEach(function (k) { p.bulk[k] = seed[k]; });
@@ -2420,7 +2428,7 @@
     var nm = ed.name;
     openPlanBulk({
       type: ed.type, name: ed.name || '', venue: ed.venue || '', allDay: !!ed.allDay, startTime: ed.allDay ? '' : (ed.startTime || ''), endTime: ed.allDay ? '' : (ed.endTime || ''),
-      memo: ed.memo || '', assign: assign, people: ed.type === '不在' ? (ed.people || []).slice() : []
+      memo: ed.memo || '', calDesc: ed.calDesc || '', assign: assign, people: ed.type === '不在' ? (ed.people || []).slice() : []
     });
     S.plan.msg = { kind: 'ok', text: '「' + nm + '」の中身でまとめて登録を開きました。日を選んでください（まだ作っていません）' };
     renderPlan();
@@ -2528,7 +2536,8 @@
       '<label class="chk"><input type="checkbox" data-pb="allDay"' + (bk.allDay ? ' checked' : '') + '> 終日</label>' +
       (bk.allDay ? '' : '<div class="pl-dates"><label>開始時刻 <input type="time" step="300" data-pb="startTime" value="' + esc(bk.startTime) + '"></label>' +
         '<label>終了時刻 <input type="time" step="300" data-pb="endTime" value="' + esc(bk.endTime) + '"></label></div>') +
-      '<label>スタッフ向けメモ <textarea data-pb="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(bk.memo) + '</textarea></label></div>';
+      '<label>スタッフ向けメモ <textarea data-pb="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(bk.memo) + '</textarea></label>' +
+      calDescField('pb', bk.calDesc) + '</div>';
     // 2. 共通の担当（不在なら不在の人）
     if (bk.type === '不在') {
       h += '<h3 class="pl-h">2. 不在の人（全部の日の共通）</h3><p class="hint">日ごとに変えるときは、下の日の一覧の［この日を変える］から。</p>' +
@@ -2619,7 +2628,7 @@
   // ★ 検査に通らない依頼は理由を出し、最初はチェックを外す（取り込むと「要修正」と理由がシートに戻る）。1回50件まで
   // ★ 取り込みのあとは1件ずつ保存したときと同じ。参加の受付・カレンダー反映は始めない
 
-  var REQ_FIELDS = [['type', '種類'], ['name', '名前'], ['venue', '会場'], ['dates', '日付'], ['time', '時間'], ['who', '担当'], ['memo', 'メモ'], ['status', '状態']];
+  var REQ_FIELDS = [['type', '種類'], ['name', '名前'], ['venue', '会場'], ['dates', '日付'], ['time', '時間'], ['who', '担当'], ['memo', 'メモ'], ['calDesc', 'カレンダーの説明'], ['status', '状態']];
   function openPlanReq() {
     var p = S.plan;
     p.req = { status: 'loading', items: [], pick: {}, confirm: false, opId: newOpId(), results: null };
@@ -2650,7 +2659,7 @@
         var multi = o.startDate !== o.endDate;
         return staffNm(a.staffId) + '（' + (ROLE_SHORT[a.role] || a.role) + (multi && a.days ? '・' + shortDays(a.days) : '') + '）';
       }).join('・') : '未定');
-    return { type: tp, name: o.name || '', venue: o.venue || 'なし', dates: sd + ed, time: o.allDay ? '終日' : (o.startTime + '–' + o.endTime), who: who, memo: o.memo || 'なし', status: o.status || '' };
+    return { type: tp, name: o.name || '', venue: o.venue || 'なし', dates: sd + ed, time: o.allDay ? '終日' : (o.startTime + '–' + o.endTime), who: who, memo: o.memo || 'なし', calDesc: o.calDesc || 'なし', status: o.status || '' };
   }
   function reqItemHtml(it, withPick, dis) {
     var q = S.plan.req, on = !!q.pick[it.id];
@@ -2668,7 +2677,8 @@
           '<p class="pq-sub muted">' + esc(b.dates + '・' + b.name) + '</p>';
       } else {
         h += '<p class="pq-sub">' + esc(a.dates + '　' + a.name + '（' + a.type + '・' + a.time + (a.venue !== 'なし' ? '・' + a.venue : '') + '）') + '</p>' +
-          '<p class="pq-sub muted">' + esc(a.who + '／' + (a.status === '確定' ? '確定で作る' : '下書きで作る') + (a.memo !== 'なし' ? '／メモ：' + a.memo : '')) + '</p>';
+          '<p class="pq-sub muted">' + esc(a.who + '／' + (a.status === '確定' ? '確定で作る' : '下書きで作る') + (a.memo !== 'なし' ? '／メモ：' + a.memo : '')) + '</p>' +
+          (a.calDesc !== 'なし' ? '<p class="pq-sub muted">カレンダーの説明：' + esc(a.calDesc) + '</p>' : '');
       }
     }
     if (it.answers) {   // 参加の回答がある予定の日時を変える依頼（v45〜）
@@ -2934,7 +2944,7 @@
       renderBulkDates(); return;
     }
     else if (f === 'allDay') bk.allDay = t.checked;
-    else if (f === 'name' || f === 'memo') {   // 打つたびに input で反映済み。離れたときの change では描き直さない（押したボタンが消えないように）
+    else if (f === 'name' || f === 'memo' || f === 'calDesc') {   // 打つたびに input で反映済み。離れたときの change では描き直さない（押したボタンが消えないように）
       if (bk[f] !== t.value) { bk[f] = t.value; renderBulkDates(); }
       return;
     }
@@ -2964,7 +2974,7 @@
     });
     var body = {
       month: S.month, opId: bk.opId, days: days, type: bk.type, name: bk.name, venue: bk.venue, allDay: !!bk.allDay,
-      startTime: bk.allDay ? '' : bk.startTime, endTime: bk.allDay ? '' : bk.endTime, memo: bk.memo, status: bk.status === '確定' ? '確定' : '下書き'
+      startTime: bk.allDay ? '' : bk.startTime, endTime: bk.allDay ? '' : bk.endTime, memo: bk.memo, calDesc: bk.calDesc || '', status: bk.status === '確定' ? '確定' : '下書き'
     };
     p.busy = true;
     p.msg = { kind: 'busy', text: dates.length + '件作っています…' };
@@ -3017,6 +3027,7 @@
     if (p.busy) return;
     if (!String(ed.name || '').trim()) { p.msg = { kind: 'ng', text: '⚠ 名前を入れてください' }; renderPlan(); return; }
     if (!edHasDates(ed)) { p.msg = { kind: 'ng', text: '⚠ 開始日と終了日を選んでください' }; renderPlan(); return; }
+    if (String(ed.calDesc || '').length > CAL_DESC_MAX) { p.msg = { kind: 'ng', text: '⚠ カレンダーの説明は' + CAL_DESC_MAX + '字までです' }; renderPlan(); return; }
     if (!ed.allDay && (!ed.startTime || !ed.endTime)) { p.msg = { kind: 'ng', text: '⚠ 時刻を入れるか、「終日」にしてください' }; renderPlan(); return; }
     if (status === '中止' && ed.status !== '中止' && !window.confirm('この予定を中止にします。\nカレンダーからは次の反映で消え、家族にも出なくなります。よろしいですか？')) return;
     // 参加の回答がある予定の日時を変えるとき：回答を残すか、答え直してもらうかを選んでから保存（v45〜）
@@ -3038,7 +3049,7 @@
     var body = {
       opId: ed.opId, id: ed.id || undefined, type: ed.type, name: ed.name, venue: ed.venue,
       startDate: ed.startDate, endDate: ed.endDate, allDay: !!ed.allDay, startTime: ed.allDay ? '' : ed.startTime, endTime: ed.allDay ? '' : ed.endTime,
-      status: status, memo: ed.memo, assignments: ed.type === '不在' ? [] : assignments, people: ed.type === '不在' ? ed.people : []
+      status: status, memo: ed.memo, calDesc: ed.calDesc || '', assignments: ed.type === '不在' ? [] : assignments, people: ed.type === '不在' ? ed.people : []
     };
     if (PARTIAL_DEFAULT.hasOwnProperty(ed.type)) body.partial = planPartial(ed);
     if (answerMode === 'keep' || answerMode === 'recheck') body.answerMode = answerMode;
