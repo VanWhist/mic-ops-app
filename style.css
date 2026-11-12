@@ -830,3 +830,6 @@ button.btn-busy { opacity: .6; cursor: progress; pointer-events: none; }
 .pq-ans { margin: 4px 0 0 28px; font-size: 14px; }
 .pq-ans label { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; margin-right: 12px; }
 .pq-ans input { width: 20px; height: 20px; }
+/* 確定したらすぐ受付を始める（v46〜） */
+.pb-ao { display: flex; align-items: center; gap: 6px; min-height: 40px; font-size: 15px; margin-top: 4px; }
+.pb-ao input { width: 22px; height: 22px; }
