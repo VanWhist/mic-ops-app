@@ -516,7 +516,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261111b';
+  var APP_VERSION = '20261112a';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -1276,10 +1276,12 @@
     var sum = { created: 0, updated: 0, deleted: 0, failed: 0 };
     var progress = function () { return '作成' + sum.created + '・更新' + sum.updated + '・削除' + sum.deleted + (sum.failed ? '・失敗' + sum.failed : ''); };
     S.calMsg = { kind: 'busy', text: '反映中…' };
+    var autoList = [];
     renderCalBar();
     var step = function () {
       return api('calSync', {}, CAL_SYNC_TIMEOUT_MS).then(function (r) {
         Object.keys(sum).forEach(function (k) { sum[k] += r.result[k] || 0; });
+        (r.autoOpened || []).forEach(function (x) { autoList.push(x); });   // v46〜
         S.cal = Object.assign({}, S.cal, { syncedAt: r.syncedAt || (S.cal && S.cal.syncedAt), dirty: r.dirty });
         if (r.more) { S.calMsg = { kind: 'busy', text: '反映中…（' + progress() + '）' }; renderCalBar(); return step(); }
       });
@@ -1287,7 +1289,9 @@
     step().then(function () {
       S.calMsg = sum.failed
         ? { kind: 'ng', text: '⚠ 一部反映できませんでした（' + progress() + '）。もう一度押してください' }
-        : { kind: 'ok', text: '✓ 反映しました（' + progress() + '）最終反映：' + stampLabel(S.cal.syncedAt) };
+        : { kind: 'ok', text: '✓ 反映しました（' + progress() + '）最終反映：' + stampLabel(S.cal.syncedAt) +
+          (autoList.length ? '。MICスケジュールの新しい予定' + autoList.length + '件の参加の受付も始めました（' + autoList.map(function (x) { return x.title; }).join('・') + '）' : '') };
+      if (autoList.length) Object.keys(S.events).forEach(function (m) { delete S.events[m]; });
     }, function (e) {
       S.calMsg = { kind: 'ng', text: '⚠ 反映できませんでした：' + e.message };
     }).then(function () { S.calBusy = false; renderCalBar(); });
@@ -1727,13 +1731,23 @@
     S.evMsg = null;
     S.events[month] = { status: 'loading', data: cur && cur.data, at: cur && cur.at };
     renderEvents();
-    api('events', fresh && S.me.isAdmin ? { month: month, fresh: true } : { month: month }).then(function (r) {
+    var q = fresh && S.me.isAdmin ? { month: month, fresh: true } : { month: month };
+    if (S.me.isAdmin && (S.tab === 'events' || S.tab === 'plan')) q.checkImported = true;   // MICスケジュールの新しい予定の受付（v46〜）
+    api('events', q).then(function (r) {
       S.events[month] = { status: 'ok', data: r, at: Date.now() };
+      if (r.autoOpened && r.autoOpened.length) autoOpenedMsg(r.autoOpened);
       saveCache();
     }, function (e) {
       var msg = e.code === 'bad_request' && /不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です。更新後に「最新にする」を押してください' : e.message;
       S.events[month] = { status: 'error', error: msg, data: cur && cur.data, at: cur && cur.at };
     }).then(function () { if (S.tab === 'events') renderSafe(); else renderEvents(); if (S.tab === 'plan') renderPlan(); if (S.tab === 'cal') renderCalTab(); });
+  }
+
+  /** MICスケジュールの新しい予定の受付を自動で始めたとき（v46〜）。予定と担当・計画のどちらにも出す */
+  function autoOpenedMsg(list) {
+    var text = '✓ MICスケジュールの新しい予定' + list.length + '件の参加の受付を始めました（' + list.map(function (x) { return shortDays([x.date]) + ' ' + x.title; }).join('・') + '）';
+    S.evMsg = { kind: 'ok', text: text };
+    if (S.plan && !S.plan.ed && !S.plan.bulk && !S.plan.conf && !S.plan.req) S.plan.msg = { kind: 'ok', text: text };
   }
 
   /** 管理者の操作。成功したらサーバーが返した月の予定で描き直す。then は続けて行う操作 */
@@ -2242,6 +2256,7 @@
       else if (t.dataset.pq === 'ans') { p.req.ansModes[t.dataset.id] = t.value === 'keep' ? 'keep' : 'recheck'; }   // v45〜
       return;
     }   // Coworkからの依頼（v44〜）
+    if (p.conf && t.dataset.pc === 'autoOpen') { p.conf.autoOpen = t.checked; return; }   // v46〜
     if (p.conf) { if (t.dataset.pc === 'pick') { p.conf.off[t.value] = !t.checked; renderPlanConf(); } return; }   // まとめて確定（v43〜）
     if (planLodgingChange(t)) return;   // 宿泊（v21〜）
     if (t.name === 'plView') { p.view = t.value; renderPlan(); return; }
@@ -2261,6 +2276,7 @@
     ed.ansAsk = null;   // 中身を直したら、回答の扱いは保存のときに聞き直す（v45〜）
     if (f === 'allDay') ed.allDay = t.checked;
     else if (f === 'partial') { ed.partial = t.checked; return; }
+    else if (f === 'autoOpen') { ed.autoOpen = t.checked; return; }   // v46〜
     else if (f === 'person') {
       var i = ed.people.indexOf(t.value);
       if (t.checked && i < 0) ed.people.push(t.value); else if (!t.checked && i >= 0) ed.people.splice(i, 1);
@@ -2298,6 +2314,8 @@
       '<label>終了日 <input type="date" data-ed="endDate" value="' + ed.endDate + '" min="' + lim.min + '" max="' + lim.max + '"></label></div>' +
       '<label class="chk"><input type="checkbox" data-ed="allDay"' + (ed.allDay ? ' checked' : '') + '> 終日</label>' +
       (PARTIAL_DEFAULT.hasOwnProperty(ed.type) ? '<label class="chk"><input type="checkbox" data-ed="partial"' + (planPartial(ed) ? ' checked' : '') + '> 家族の参加の回答で、時間の指定を受け付ける</label>' : '') +
+      // 確定したらすぐ受付を始める（v46〜）：新しい予定・下書きのときだけ（確定の瞬間にだけ効く）
+      (PARTIAL_DEFAULT.hasOwnProperty(ed.type) && (!ed.id || ed.status === '下書き') ? '<label class="chk"><input type="checkbox" data-ed="autoOpen"' + (ed.autoOpen !== false ? ' checked' : '') + '> 確定したらすぐ参加の受付を始める</label>' : '') +
       (ed.allDay ? '' : '<div class="pl-dates"><label>開始時刻 <input type="time" step="300" data-ed="startTime" value="' + esc(ed.startTime) + '"></label>' +
         '<label>終了時刻 <input type="time" step="300" data-ed="endTime" value="' + esc(ed.endTime) + '"></label></div>') +
       '<label>スタッフ向けメモ <textarea data-ed="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(ed.memo) + '</textarea></label>' +
@@ -2515,7 +2533,8 @@
         (bk.allDay ? '終日' : esc(bk.startTime + '–' + bk.endTime)) + '）をすべて「' + (mkConf ? '確定' : '下書き') + '」で作ります。</p>' +
         '<fieldset class="pb-status"><legend>作るときの状態</legend>' +
         '<label><input type="radio" name="pbStatus" data-pb="status" value="下書き"' + (mkConf ? '' : ' checked') + dis + '> 下書きで作る（管理者だけに見える）</label>' +
-        '<label><input type="radio" name="pbStatus" data-pb="status" value="確定"' + (mkConf ? ' checked' : '') + dis + '> 確定で作る（スタッフ・家族に見える）</label></fieldset>' +
+        '<label><input type="radio" name="pbStatus" data-pb="status" value="確定"' + (mkConf ? ' checked' : '') + dis + '> 確定で作る（スタッフ・家族に見える）</label>' +
+        (mkConf && PARTIAL_DEFAULT.hasOwnProperty(bk.type) ? '<label class="pb-ao"><input type="checkbox" data-pb="autoOpen"' + (bk.autoOpen !== false ? ' checked' : '') + dis + '> 確定したらすぐ参加の受付を始める</label>' : '') + '</fieldset>' +
         '<ol class="pb-confirm-list">' + chosen.map(function (d) {
           return '<li>' + esc(longDate(d)) + (bulkSame(bk, d) ? ' <span class="badge tent">同じ名前の予定あり</span>' : '') +
             '<div class="pb-asg' + (bulkDayChanged(bk, d) ? ' changed' : '') + '">' + esc(bulkDayText(bk, d)) + '</div></li>';
@@ -2677,7 +2696,7 @@
           '<p class="pq-sub muted">' + esc(b.dates + '・' + b.name) + '</p>';
       } else {
         h += '<p class="pq-sub">' + esc(a.dates + '　' + a.name + '（' + a.type + '・' + a.time + (a.venue !== 'なし' ? '・' + a.venue : '') + '）') + '</p>' +
-          '<p class="pq-sub muted">' + esc(a.who + '／' + (a.status === '確定' ? '確定で作る' : '下書きで作る') + (a.memo !== 'なし' ? '／メモ：' + a.memo : '')) + '</p>' +
+          '<p class="pq-sub muted">' + esc(a.who + '／' + (a.status === '確定' ? '確定で作る' + (PARTIAL_DEFAULT.hasOwnProperty(it.after.type) ? (it.after.autoOpen === false ? '（受付は始めない）' : '（受付も始める）') : '') : '下書きで作る') + (a.memo !== 'なし' ? '／メモ：' + a.memo : '')) + '</p>' +
           (a.calDesc !== 'なし' ? '<p class="pq-sub muted">カレンダーの説明：' + esc(a.calDesc) + '</p>' : '');
       }
     }
@@ -2813,6 +2832,7 @@
     if (c.confirm) {
       h += '<div class="pc-confirm"><h3 class="pl-h">' + chosen.length + '件を確定します</h3><ol class="pb-confirm-list">' +
         chosen.map(function (ev) { return '<li>' + line(ev) + '</li>'; }).join('') + '</ol>' +
+        (chosen.some(function (ev) { return PARTIAL_DEFAULT.hasOwnProperty(ev.type); }) ? '<label class="chk pb-ao"><input type="checkbox" data-pc="autoOpen"' + (c.autoOpen !== false ? ' checked' : '') + dis + '> 確定したらすぐ参加の受付を始める（練習会・合宿・大会）</label>' : '') +
         '<div class="pl-acts"><button type="button" class="primary" data-pc="do"' + dis + '>' + chosen.length + '件を確定</button>' +
         '<button type="button" class="secondary" data-pc="unconfirm"' + dis + '>戻って選び直す</button></div>' +
         '<p class="hint">確定すると、スタッフ・家族に見えます。参加の受付とカレンダー反映は、今までどおり「予定と担当」から始めてください（自動では始めません）。</p></div>';
@@ -2855,12 +2875,12 @@
     p.busy = true;
     p.msg = { kind: 'busy', text: evs.length + '件を確定しています…' };
     renderPlan();
-    api('confirmAppEvents', { month: S.month, opId: c.opId, ids: evs.map(function (ev) { return ev.appId; }) }, 90000).then(function (r) {
+    api('confirmAppEvents', { month: S.month, opId: c.opId, ids: evs.map(function (ev) { return ev.appId; }), autoOpen: c.autoOpen !== false }, 90000).then(function (r) {
       S.events[S.month] = { status: 'ok', data: r, at: Date.now() };
       Object.keys(S.events).forEach(function (m) { if (m !== S.month) delete S.events[m]; });
       var sv = r.saved || { confirmed: [], skipped: [] };
       p.conf = null;
-      p.msg = { kind: sv.skipped && sv.skipped.length ? 'busy' : 'ok', html: '✓ ' + sv.confirmed.length + '件を確定しました' +
+      p.msg = { kind: sv.skipped && sv.skipped.length ? 'busy' : 'ok', html: '✓ ' + sv.confirmed.length + '件を確定しました' + (sv.opened ? '。' + sv.opened + '件は参加の受付も始めました' : '') +
         (sv.skipped && sv.skipped.length ? '（' + sv.skipped.length + '件は確定できませんでした：' + esc(sv.skipped.map(function (x) { return x.id + ' ' + x.reason; }).join('、')) + '）' : '') +
         ' <button type="button" class="mini" data-pa="goto-events">予定と担当で参加の受付・カレンダー反映へ</button>' };
       saveCache();
@@ -2934,6 +2954,7 @@
       if (t.checked && i < 0) bk.wds.push(w); else if (!t.checked && i >= 0) bk.wds.splice(i, 1);
     } else if (f === 'pick') { bk.pick[t.value] = t.checked; }
     else if (f === 'status') { bk.status = t.value === '確定' ? '確定' : '下書き'; renderPlan(); return; }   // 確定で作る（v43〜）
+    else if (f === 'autoOpen') { bk.autoOpen = t.checked; return; }   // v46〜
     else if (f === 'person') {
       var pi = bk.people.indexOf(t.value);
       if (t.checked && pi < 0) bk.people.push(t.value); else if (!t.checked && pi >= 0) bk.people.splice(pi, 1);
@@ -2974,7 +2995,8 @@
     });
     var body = {
       month: S.month, opId: bk.opId, days: days, type: bk.type, name: bk.name, venue: bk.venue, allDay: !!bk.allDay,
-      startTime: bk.allDay ? '' : bk.startTime, endTime: bk.allDay ? '' : bk.endTime, memo: bk.memo, calDesc: bk.calDesc || '', status: bk.status === '確定' ? '確定' : '下書き'
+      startTime: bk.allDay ? '' : bk.startTime, endTime: bk.allDay ? '' : bk.endTime, memo: bk.memo, calDesc: bk.calDesc || '', status: bk.status === '確定' ? '確定' : '下書き',
+      autoOpen: bk.autoOpen !== false
     };
     p.busy = true;
     p.msg = { kind: 'busy', text: dates.length + '件作っています…' };
@@ -2988,7 +3010,7 @@
       if (S.month !== dates[0].slice(0, 7) && monthsOf(S.period).indexOf(dates[0].slice(0, 7)) >= 0) S.month = dates[0].slice(0, 7);
       var range = '（' + shortDays([dates[0]]) + (dates.length > 1 ? '〜' + shortDays([dates[dates.length - 1]]) : '') + '）';
       p.msg = body.status === '確定'
-        ? { kind: 'ok', html: '✓ ' + esc(bk.name + '：' + n + '件を確定で作りました' + range) + ' <button type="button" class="mini" data-pa="goto-events">予定と担当で参加の受付・カレンダー反映へ</button>' }
+        ? { kind: 'ok', html: '✓ ' + esc(bk.name + '：' + n + '件を確定で作りました' + range + (r.saved && r.saved.opened ? '。参加の受付も始めました' : '')) + ' <button type="button" class="mini" data-pa="goto-events">予定と担当で参加の受付・カレンダー反映へ</button>' }
         : { kind: 'ok', text: '✓ ' + bk.name + '：' + n + '件を下書きで作りました' + range + '。確定は1件ずつ「開く」か［下書きをまとめて確定］から' };
       if (body.status === '確定') loadCalStatus();
       saveCache();
@@ -3053,6 +3075,7 @@
     };
     if (PARTIAL_DEFAULT.hasOwnProperty(ed.type)) body.partial = planPartial(ed);
     if (answerMode === 'keep' || answerMode === 'recheck') body.answerMode = answerMode;
+    body.autoOpen = ed.autoOpen !== false;   // 確定したらすぐ受付を始める（v46〜）
     try { var lgBody = planLodgingBody(ed); } catch (err) { p.msg = { kind: 'ng', text: '⚠ ' + err.message }; renderPlan(); return; }
     if (lgBody !== undefined) body.lodging = lgBody;
     var label = (status === '下書き' ? '下書きで保存しました' : status === '中止' ? '中止にしました' : '確定しました') +
@@ -3073,6 +3096,7 @@
       Object.keys(S.events).forEach(function (m) { if (m !== S.month) delete S.events[m]; });
       if (ed) { p.start = ed.startDate; p.end = ed.endDate; p.pick = 'start'; }
       p.ed = null;
+      if (r.saved && r.saved.opened) label += '。参加の受付も始めました';   // v46〜
       p.msg = { kind: 'ok', html: '✓ ' + esc((ed && ed.name ? ed.name + '：' : '') + label) +
         (linkEvents ? ' <button type="button" class="mini" data-pa="goto-events">予定と担当で参加の受付・カレンダー反映へ</button>' : '') };
       saveCache();
