@@ -2077,6 +2077,11 @@
     var n = dayCount(a, b);
     return n > DATES_MAX ? '<span class="warn cut-note">期間が' + n + '日あります。出しているのは最初の' + DATES_MAX + '日（' + md(addDays(a, DATES_MAX - 1)) + 'まで）です</span>' : '';
   }
+  function monthsBetween(a, b) {
+    var out = [];
+    monthsOf(S.period).forEach(function (m) { if (m >= a.slice(0, 7) && m <= b.slice(0, 7)) out.push(m); });
+    return out;
+  }
   function planMonths() {
     var ms = [S.month];
     var p = S.plan, ed = p && p.ed;
