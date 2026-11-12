@@ -15,11 +15,16 @@
   var DEMO = !CFG.apiUrl;
 
   // 国民の祝日（Google カレンダー「日本の祝日」2026-10-02 確認）。土日と同じく赤で表示する
+  // 2027-07 〜 2028-03 は v48 で追加（国民の祝日に関する法律の決まりから。春分・秋分は計算の日で、前の年の2月の官報で正式に決まる）
   var HOLIDAYS = {
     '2026-11-03': '文化の日', '2026-11-23': '勤労感謝の日',
     '2027-01-01': '元日', '2027-01-11': '成人の日', '2027-02-11': '建国記念の日',
     '2027-02-23': '天皇誕生日', '2027-03-21': '春分の日', '2027-03-22': '振替休日',
-    '2027-04-29': '昭和の日', '2027-05-03': '憲法記念日', '2027-05-04': 'みどりの日', '2027-05-05': 'こどもの日'
+    '2027-04-29': '昭和の日', '2027-05-03': '憲法記念日', '2027-05-04': 'みどりの日', '2027-05-05': 'こどもの日',
+    '2027-07-19': '海の日', '2027-08-11': '山の日', '2027-09-20': '敬老の日', '2027-09-23': '秋分の日',
+    '2027-10-11': 'スポーツの日', '2027-11-03': '文化の日', '2027-11-23': '勤労感謝の日',
+    '2028-01-01': '元日', '2028-01-10': '成人の日', '2028-02-11': '建国記念の日',
+    '2028-02-23': '天皇誕生日', '2028-03-20': '春分の日'
   };
   var WD = ['日', '月', '火', '水', '木', '金', '土'];
   var ROLE_DEF = [
@@ -466,10 +471,12 @@
 
   function setPending(date, s, n) {
     S.pending[date] = { s: s, n: s === '△' ? cleanNote(n) : '' };
+    S.flushLoop = 0;   // 新しい入力は待たせない（v48〜）
   }
 
   function pendingCount() { return Object.keys(S.pending).length; }
 
+  var FLUSH_LOOP_MAX = 6;   // ○△×の送り直し：続けて減らないときの上限（間隔は 0.5→1→2→4→8→16秒）
   function scheduleFlush(delay) {
     clearTimeout(S.timer);
     S.timer = setTimeout(flush, delay == null ? 400 : delay);
@@ -480,6 +487,7 @@
     if (S.inflight || pendingCount() === 0) return Promise.resolve();
     var dates = Object.keys(S.pending).sort().slice(0, BATCH_MAX);
     var days = dates.map(function (d) { return { date: d, status: S.pending[d].s, note: S.pending[d].n }; });
+    var before = pendingCount();
     S.inflight = true;
     S.error = null;
     renderSaveState();
@@ -503,11 +511,25 @@
     }, function (e) {
       days.forEach(function (d) { S.failed[d.date] = true; });
       S.error = e.message;
+    }).then(null, function (e) {
+      // 成功のあとの処理が失敗しても「保存中」のまま残さない（v48〜）
+      days.forEach(function (d) { S.failed[d.date] = true; });
+      S.error = (e && e.message) || '保存の結果を確かめられませんでした';
     }).then(function () {
       S.inflight = false;
-      renderAll();
-      renderTabsBadge();   // ○を付けた日の受付中の予定が「参加しますか？」に増える
-      if (pendingCount() && !S.error) scheduleFlush(0);
+      try { renderAll(); renderTabsBadge(); } catch (e2) { if (window.console) console.error(e2); }   // ○を付けた日の受付中の予定が「参加しますか？」に増える
+      if (!pendingCount()) { S.flushLoop = 0; return; }
+      if (S.error) return;
+      // 送り直し：減っていれば（件数が多いときの続き）すぐ。減らないときは間隔を伸ばし、FLUSH_LOOP_MAX 回で止める（v48〜）
+      if (pendingCount() < before) S.flushLoop = 0; else S.flushLoop = (S.flushLoop || 0) + 1;
+      if (S.flushLoop > FLUSH_LOOP_MAX) {
+        S.flushLoop = 0;
+        Object.keys(S.pending).forEach(function (d) { S.failed[d] = true; });
+        S.error = '保存できていない日があります。もう一度お試しください';
+        try { renderAll(); } catch (e3) { if (window.console) console.error(e3); }
+        return;
+      }
+      scheduleFlush(S.flushLoop ? Math.min(30000, 500 * Math.pow(2, S.flushLoop - 1)) : 0);
     });
   }
 
@@ -516,7 +538,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261112b';
+  var APP_VERSION = '20261112c';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -1533,7 +1555,7 @@
 
   /** 下書きが保存済みの回答と違うか（選んだのに保存していない日がある） */
   function draftDirty(ev, id) {
-    var dr = S.ansDraft && S.ansDraft[ev.key + '|' + id];
+    var dr = S.ansDraft && S.ansDraft[ev.key + '|' + id] && draftOf(ev.key, id);   // 手を付けていない古い下書きは作り直してから比べる（v48〜）
     if (!dr || !ev.answers) return false;
     var m = ev.answers.mine[id] || {};
     var saved = m.days || {};
@@ -1563,17 +1585,28 @@
   }
 
   /** 選手の下書き（まだ無ければ保存済みの回答から作る） */
+  /** 下書きの置き場（v48〜）：作ったときの形（base）を覚え、手を付けていない下書きは、新しいデータが届いたら作り直す。
+   *  入力途中（base と違う）の下書きは消さない。make＝今の保存済みの内容から下書きを作る関数 */
+  function draftSlot(store, k, make) {
+    S.draftBase = S.draftBase || {};
+    var bk = store + '|' + k, cur = S[store][k];
+    if (cur && S.draftBase[bk] !== undefined && JSON.stringify(cur) === S.draftBase[bk]) {
+      var fresh = make();
+      if (JSON.stringify(fresh) !== S.draftBase[bk]) cur = null;   // 手を付けていない・保存済みが変わった → 作り直す
+    }
+    if (!cur) { cur = S[store][k] = make(); S.draftBase[bk] = JSON.stringify(cur); }
+    return cur;
+  }
+
   function draftOf(key, id) {
     S.ansDraft = S.ansDraft || {};
-    var k = key + '|' + id;
-    if (!S.ansDraft[k]) {
+    return draftSlot('ansDraft', key + '|' + id, function () {
       var ev = upcomingEvent(key);
       var m = (ev && ev.answers && ev.answers.mine[id]) || {};
       var dr = {};
       Object.keys(m.days || {}).forEach(function (d) { var v = m.days[d]; dr[d] = { k: v.k, s: v.s || '', e: v.e || '', n: v.n || '' }; });
-      S.ansDraft[k] = dr;
-    }
-    return S.ansDraft[k];
+      return dr;
+    });
   }
 
   function halfHours(win) {
@@ -1641,6 +1674,7 @@
       S.upcoming = { status: 'ok', data: r };
       ids.forEach(function (x) { delete S.ansDraft[key + '|' + x]; });   // 保存した内容から作り直す
       S.ansMsg = { kind: 'ok', text: '✓ ' + ev.title + '：' + ids.map(nameOf).join('・') + 'の回答を保存しました' };
+      saveCache();   // 端末に残す分も新しくする（v48〜）
     }, function (e) {
       S.ansMsg = { kind: 'ng', text: '⚠ 保存できませんでした：' + e.message };
     }).then(function () { S.ansBusy = false; renderUpcoming(); renderTabsBadge(); });
@@ -1816,8 +1850,10 @@
     S.evBusy = true;
     S.evMsg = { kind: 'busy', text: '保存中…' };
     renderEvents();
+    var others = [];   // 月をまたぐ予定：ほかの月の分も古くなる（v48〜）
     api(action, Object.assign({ month: month }, payload)).then(function (r) {
       S.events[month] = { status: 'ok', data: r, at: Date.now() };
+      others = otherMonthsOf(payload && payload.eventKey, month, r);
       var next = then && then();
       if (next) return api(next.action, Object.assign({ month: month }, next.payload)).then(function (r2) { S.events[month] = { status: 'ok', data: r2, at: Date.now() }; });
     }).then(function () {
@@ -1828,7 +1864,30 @@
       if (S.cal && S.cal.configured) { S.cal.dirty = true; S.calMsg = null; renderCalBar(); }
     }, function (e) {
       S.evMsg = { kind: 'ng', text: '⚠ 保存できませんでした：' + e.message };
-    }).then(function () { S.evBusy = false; renderEvents(); });
+    }).then(function () {
+      S.evBusy = false;
+      var keep = S.evMsg;   // 読み直しで「✓ 保存しました」を消さない
+      others.forEach(function (m) { loadEvents(m, true); });   // 予定がかかるほかの月を読み直す（担当・受付などを全部の月でそろえる）
+      S.evMsg = keep;
+      renderEvents();
+    });
+  }
+
+  /** その予定がかかる、今の月のほかの月（読み込んだことのある月だけ。読んでいない月は開いたときに読む）（v48〜） */
+  function otherMonthsOf(eventKey, month, r) {
+    if (!eventKey) return [];
+    var ev = ((r && r.events) || []).filter(function (x) { return x.key === eventKey; })[0];
+    if (!ev) Object.keys(S.events).some(function (m) {
+      var d = S.events[m] && S.events[m].data;
+      ev = ((d && d.events) || []).filter(function (x) { return x.key === eventKey; })[0];
+      return !!ev;
+    });
+    var out = [];
+    ((ev && ev.dates) || []).forEach(function (d) {
+      var m = d.slice(0, 7);
+      if (m !== month && out.indexOf(m) < 0 && S.events[m]) out.push(m);
+    });
+    return out;
   }
 
   /** その予定の日付すべてでの、スタッフの空き具合 */
@@ -3255,7 +3314,7 @@
         var parts = [];
         if (a.partial || d.time.length) {
           parts.push('終日' + d.full.length + who(d.full));
-          if (d.time.length) parts.push('時間指定' + d.time.length + '（' + d.time.map(function (x) { return esc(x.name) + ' ' + x.start + '–' + x.end; }).join('、') + '）');
+          if (d.time.length) parts.push('時間指定' + d.time.length + '（' + d.time.map(function (x) { return esc(x.name) + ' ' + esc(x.start) + '–' + esc(x.end); }).join('、') + '）');
         } else parts.push('参加' + d.full.length + who(d.full));
         parts.push('不参加' + d.no.length + who(d.no), '未回答' + d.unanswered.length);
         // 家族の備考（管理者だけ。サーバーは管理者にだけ返す）
@@ -3774,7 +3833,7 @@
         var s = Math.max(0, week.indexOf(d[0] < ws ? ws : d[0])), e = week.indexOf(d[d.length - 1] > we ? we : d[d.length - 1]);
         if (e < 0) e = 6;
         var lane = -1;
-        for (var L = 0; L < CAL_LANES; L++) { if (!lanes[L] || lanes[L] < s) { lane = L; break; } }
+        for (var L = 0; L < CAL_LANES; L++) { if (lanes[L] === undefined || lanes[L] < s) { lane = L; break; } }   // 0（日曜で終わる帯）を「空き」にしない（v48〜）
         if (lane < 0) { for (var c = s; c <= e; c++) hidden[c] = (hidden[c] || 0) + 1; return; }
         lanes[lane] = e;
         var mine = week.slice(s, e + 1).some(function (dd) { return calMine(x.ev, dd); });
@@ -4360,18 +4419,16 @@
   /** 回答の下書き（無ければ保存済みの回答から作る）。key＝予定のキー、who＝選手ID か 'me'（スタッフ） */
   function lgDraft(ev, who) {
     S.lgDraft = S.lgDraft || {};
-    var k = ev.key + '|' + who;
-    if (!S.lgDraft[k]) {
+    return draftSlot('lgDraft', ev.key + '|' + who, function () {   // 新しいデータが届いたら作り直す（v48〜）
       var saved = who === 'me' ? ev.lodging.mine : (ev.lodging.mine || {})[who];
       var dr = {};
       Object.keys(saved || {}).forEach(function (n) { var v = saved[n]; dr[n] = { s: v.s || '', d: v.d || '', b: v.b || '' }; });
-      S.lgDraft[k] = dr;
-    }
-    return S.lgDraft[k];
+      return dr;
+    });
   }
 
   function lgDirty(ev, who) {
-    var dr = S.lgDraft && S.lgDraft[ev.key + '|' + who];
+    var dr = S.lgDraft && S.lgDraft[ev.key + '|' + who] && lgDraft(ev, who);
     if (!dr) return false;
     var saved = (who === 'me' ? ev.lodging.mine : (ev.lodging.mine || {})[who]) || {};
     return ev.lodging.nights.some(function (n) {
@@ -4405,7 +4462,7 @@
   function lgSummaryHtml(l, admin) {
     return '<ul class="lg-sum">' + l.summary.map(function (s) {
       var line = '<b>' + lgDate(s.night) + 'の夜</b>：泊' + (s.athletes + s.staff) + '名（選手' + s.athletes + '・スタッフ' + s.staff + '）' +
-        (s.adults ? '＋大人' + s.adults + '名' : '') +   // 家庭の大人（v40〜）
+        (s.adults ? '＋大人' + esc(s.adults) + '名' : '') +   // 家庭の大人（v40〜）
         (l.dinner ? '／夕食' + s.dinner : '') + (l.breakfast ? '／朝食' + s.breakfast : '');
       var names = s.stay.map(function (p) {
         var m = admin ? [p.dinner ? '夕' : '', p.breakfast ? '朝' : ''].filter(Boolean).join('') : '';
@@ -4503,6 +4560,7 @@
       if (S.family) S.upcoming = { status: 'ok', data: r };
       else S.events[month] = { status: 'ok', data: r, at: Date.now() };
       delete S.lgDraft[ev.key + '|' + who];
+      saveCache();   // 端末に残す分も新しくする（v48〜）
       lgMsg('ok', '✓ ' + ev.title + '：' + (who === 'me' ? '' : nameOf(who) + 'の') + '宿泊の回答を保存しました');
     }, function (e) {
       lgMsg('ng', '⚠ 保存できませんでした：' + (/不明な操作|使えません/.test(e.message) && e.code !== 'bad_request' ? 'サーバー側（Apps Script）がまだ古い版です' : e.message));
@@ -4515,12 +4573,10 @@
 
   function lgAdultDraft(ev) {
     S.lgDraft = S.lgDraft || {};
-    var k = ev.key + '|adults';
-    if (!S.lgDraft[k]) S.lgDraft[k] = Object.assign({}, ev.lodging.mineAdults || {});
-    return S.lgDraft[k];
+    return draftSlot('lgDraft', ev.key + '|adults', function () { return Object.assign({}, ev.lodging.mineAdults || {}); });
   }
   function lgAdultDirty(ev) {
-    var dr = S.lgDraft && S.lgDraft[ev.key + '|adults'];
+    var dr = S.lgDraft && S.lgDraft[ev.key + '|adults'] && lgAdultDraft(ev);
     if (!dr) return false;
     var saved = ev.lodging.mineAdults || {};
     return ev.lodging.nights.some(function (n) { return dr[n] !== saved[n]; });
@@ -4560,6 +4616,7 @@
     api('lodgingAnswer', { month: month, eventKey: ev.key, adults: adults }).then(function (r) {
       S.upcoming = { status: 'ok', data: r };
       delete S.lgDraft[ev.key + '|adults'];
+      saveCache();
       lgMsg('ok', '✓ ' + ev.title + '：大人の人数を保存しました');
     }, function (e) {
       lgMsg('ng', '⚠ 保存できませんでした：' + (/不明な操作|使えません/.test(e.message) && e.code !== 'bad_request' ? 'サーバー側（Apps Script）がまだ古い版です' : e.message));
@@ -4572,7 +4629,7 @@
   function lgFamilyBillHtml(b) {
     if (!b) return '';
     var parts2 = ['選手' + b.athleteNights + '泊'];
-    if (b.includeAdults) parts2.push('大人' + b.adultNights + '泊');
+    if (b.includeAdults) parts2.push('大人' + esc(b.adultNights) + '泊');
     return '<div class="lg-bill-fam" role="note"><b>預かり金（目安）：' + yen(b.deposit) + '</b>' +
       '<div>' + parts2.join('＋') + '＝' + b.nights + '泊 × ' + yen(b.unitPrice) + (b.maybeNights ? '（未定の' + b.maybeNights + '泊は入っていません）' : '') + '</div>' +
       '<div class="hint">拠点の費用は、シーズン後に実際の延べ泊数で割って精算します。この金額は前もってお預かりする目安です。</div></div>';
@@ -4588,7 +4645,7 @@
         return '<tr><td>' + esc(f.name) + '</td><td>' + f.athleteNights + '</td><td>' + f.adultNights + '</td><td>' + (f.maybeNights || '') + '</td><td><b>' + f.nights + '</b></td><td>' + yen(f.deposit) + '</td></tr>';
       }).join('') : '<tr><td colspan="6" class="muted">まだ回答がありません</td></tr>') +
       '</tbody><tfoot><tr><th>合計</th><th>' + b.totals.athleteNights + '</th><th>' + b.totals.adultNights + '</th><th>' + (b.totals.maybeNights || '') + '</th><th>' + b.totals.nights + '</th><th>' + yen(b.totals.deposit) + '</th></tr></tfoot></table></div>';
-    h += '<div class="lg-info">延べ泊数：<b>' + b.totals.nights + '泊</b>（選手' + b.totals.athleteNights + (b.includeAdults ? '＋大人' + b.totals.adultNights : '・大人は含めない') + '）。未定は数えていません。</div>' +
+    h += '<div class="lg-info">延べ泊数：<b>' + b.totals.nights + '泊</b>（選手' + b.totals.athleteNights + (b.includeAdults ? '＋大人' + esc(b.totals.adultNights) : '・大人は含めない') + '）。未定は数えていません。</div>' +
       '<div class="lg-info">スタッフの泊数：' + b.staffNights + '泊（延べ泊数・預かり金には含めません）</div>' +
       '<div class="lg-info lg-unans">宿泊が未回答の家庭：' + (b.unanswered.length ? b.unanswered.map(function (f) { return esc(f.name); }).join('・') : 'なし') + '</div>' +
       '<p class="hint">アプリは金額を表示するだけです（集金・支払いの管理はしません）。</p></div>';
@@ -4607,7 +4664,7 @@
     var lines = ['【' + ev.title + '】' + l.name];
     l.summary.forEach(function (s) {
       lines.push(lgDate(s.night) + '泊：' + (s.athletes + s.staff) + '名（選手' + s.athletes + '・スタッフ' + s.staff + '）' +
-        (s.adults ? '＋大人' + s.adults + '名（大人の食事は別に確認）' : '') +
+        (s.adults ? '＋大人' + esc(s.adults) + '名（大人の食事は別に確認）' : '') +
         (l.dinner ? '　夕食' + s.dinner + '名' : '') + (l.breakfast ? '　翌朝食' + s.breakfast + '名' : ''));
       if (s.stay.length) lines.push('　' + s.stay.map(function (p) {
         var m = [l.dinner ? (p.dinner ? '夕○' : '夕×') : '', l.breakfast ? (p.breakfast ? '朝○' : '朝×') : ''].filter(Boolean).join('');
