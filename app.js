@@ -516,7 +516,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261112a';
+  var APP_VERSION = '20261112b';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -1226,6 +1226,8 @@
     byId('dcDate').max = months[months.length - 1] + '-31';
     byId('calSyncBtn').addEventListener('click', runCalSync);
     byId('joinImportBox').hidden = false;
+    byId('colorCheckBox').hidden = false;   // 色の確認（v47〜）
+    byId('ccLoad').addEventListener('click', loadColorCheck);
     byId('jiCheck').addEventListener('click', function () { runJoinImport(false); });
     byId('jiApply').addEventListener('click', function () {
       if (confirm('照合結果の「取り込む」の選手を、参加の回答に入れますか？')) runJoinImport(true);
@@ -2089,8 +2091,61 @@
   }
 
   function bandClass(ev) {
-    if (ev.cal === 'アプリ') return 'b-app' + (ev.appStatus === '下書き' ? ' b-draft' : '') + (ev.cancelled ? ' b-cancel' : '');
-    return 'b-cal' + (ev.cancelled ? ' b-cancel' : '');
+    var gc = ev.color !== undefined && NO_COLOR_TYPES.indexOf(ev.type) < 0 ? ' gc-' + (ev.color || '0') : '';   // 色（v47〜）
+    if (ev.cal === 'アプリ') return 'b-app' + gc + (ev.appStatus === '下書き' ? ' b-draft' : '') + (ev.cancelled ? ' b-cancel' : '');
+    return 'b-cal' + gc + (ev.cancelled ? ' b-cancel' : '');
+  }
+
+  /** 色の確認（v47〜）：［カレンダーに反映］の前に、終わっていない予定の色・自動か手で変えたか・理由を一覧で見る */
+  function loadColorCheck() {
+    var box = byId('ccList'), msg = byId('ccMsg');
+    msg.textContent = '読み込み中…'; msg.className = 'ev-status busy';
+    api('colorCheck', {}).then(function (r) {
+      var items = r.items || [];
+      msg.textContent = items.length + '件（終わっていない予定）。Google カレンダーの色は［カレンダーに反映］を押したときに変わります。'; msg.className = 'ev-status';
+      box.innerHTML = items.length ? '<ul class="cc-list">' + items.map(function (x) {
+        return '<li><span class="cc-sw gc-' + (x.color || '0') + '"></span><span class="cc-main"><b>' + esc(shortDays([x.date]) + (x.end !== x.date ? '〜' + shortDays([x.end]) : '') + ' ' + x.title) + '</b>' +
+          (x.draft ? ' <span class="badge draft">下書き（反映しない）</span>' : '') +
+          '<small>' + esc(x.colorName) + '・' + (x.manual ? '<b class="cc-manual">手で変えた色</b>（自動なら' + esc(x.autoName) + '）' : '自動：' + esc(x.group) + '（' + esc(x.reason) + '）') +
+          '・' + esc(x.cal === 'アプリ' ? 'アプリの予定' : x.cal === 'スケジュール' ? 'MICスケジュール' : x.cal === 'レッスン' ? 'MICレッスン' : x.cal) + '</small></span></li>';
+      }).join('') + '</ul>' : '<p class="hint">終わっていない予定はありません。</p>';
+    }, function (e) {
+      msg.textContent = '⚠ 読めませんでした：' + (/不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message); msg.className = 'ev-status ng';
+    });
+  }
+
+  // ---------------------------------------------------------------- 予定の色（v47〜・城さん確定 2026-11-12）
+  // ★ Google カレンダーの予定の色（1〜11）と同じ色。色なし（O-air・八尾・大阪Kings・そのほか）はスレート（B級のバジルと見分けるため）
+  // ★ 色の決まりはサーバー（autoColorOf）と同じ。画面では新しい予定の「自動（今は◯◯）」を出すためにだけ使う
+  var GC = { '1': ['ラベンダー', '#7986cb'], '2': ['セージ', '#33b679'], '3': ['ブドウ', '#8e24aa'], '4': ['フラミンゴ', '#e67c73'], '5': ['バナナ', '#f6bf26'], '6': ['ミカン', '#f4511e'],
+    '7': ['ピーコック', '#039be5'], '8': ['グラファイト', '#616161'], '9': ['ブルーベリー', '#3f51b5'], '10': ['バジル', '#0b8043'], '11': ['トマト', '#d50000'] };
+  var NO_COLOR_TYPES = ['不在', '一般レッスン'];
+  var COLOR_GROUPS = [['3', 'A級以上の大会'], ['10', 'B級の大会'], ['9', '合宿・遠征'], ['4', 'さのさかWJ・白馬'], ['5', 'S-air'], ['', 'O-air・八尾・大阪Kings・そのほか']];
+  function gcName(c) { return c === 'なし' || !c ? '色なし' : (GC[c] ? GC[c][0] : c); }
+  function colorNormJs(t) { t = String(t || ''); try { t = t.normalize('NFKC'); } catch (e) {} return t; }
+  function hasTok(t, ch) { return new RegExp('(^|[^A-Za-z])' + ch + '(?![A-Za-z])').test(colorNormJs(t)); }
+  function autoColorJs(o) {
+    if (NO_COLOR_TYPES.indexOf(o.type) >= 0) return '';
+    var name = o.name || o.title || '';
+    if (o.type === '大会') return hasTok(name, 'B') && !hasTok(name, 'A') ? '10' : '3';
+    if (o.type === '合宿' || /遠征/.test(name)) return '9';
+    var v = o.venue || '', tx = colorNormJs(name).toLowerCase();
+    if (v === '白馬' || v === '佐野坂') return '4';
+    if (v === 'S-air') return '5';
+    if (v === 'O-air') return '';
+    if (/(白馬|八方|はくば|hakuba|さのさか|佐野坂|サノサカ)/.test(tx)) return '4';
+    if (/(^|[^a-z])s[\s\-・_]?air/.test(tx)) return '5';
+    return '';
+  }
+  /** 色を選ぶ欄（自動・色なし・11色）。attr は ed（予定の編集）か pb（まとめて登録） */
+  function colorPickerHtml(attr, cur, auto, name) {
+    var opt = function (v, label, sw) {
+      return '<label class="cp-opt"><input type="radio" name="' + name + '" data-' + attr + '="color" value="' + esc(v) + '"' + (cur === v ? ' checked' : '') + '>' +
+        '<span class="cp-sw gc-' + sw + '"></span>' + esc(label) + '</label>';
+    };
+    return '<fieldset class="cp"><legend>色（アプリとGoogleカレンダー）</legend>' +
+      opt('', '自動（今は' + gcName(auto) + '）', auto || '0') + opt('なし', '色なし', '0') +
+      Object.keys(GC).map(function (k) { return opt(k, GC[k][0], k); }).join('') + '</fieldset>';
   }
 
   function renderPlanDetail() {
@@ -2168,7 +2223,7 @@
     openPlanEditor({
       id: ev.appId, status: ev.appStatus, type: ev.type, name: ev.title, venue: ev.venue || '',
       startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1], allDay: ev.allDay,
-      startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', calDesc: ev.calDesc || '', assign: assign, assignDays: assignDays, people: (ev.absentees || []).slice(),
+      startTime: t(ev.start), endTime: t(ev.end), memo: ev.memo || '', calDesc: ev.calDesc || '', color: ev.colorSet || '', assign: assign, assignDays: assignDays, people: (ev.absentees || []).slice(),
       partial: ev.answers ? ev.answers.partial : undefined,
       // 参加の回答（v45〜）：開いたときの日時と、今の回答（選手の数・家庭の数）
       orig: { startDate: ev.dates[0], endDate: ev.dates[ev.dates.length - 1], allDay: ev.allDay, startTime: t(ev.start), endTime: t(ev.end) },
@@ -2277,6 +2332,7 @@
     if (f === 'allDay') ed.allDay = t.checked;
     else if (f === 'partial') { ed.partial = t.checked; return; }
     else if (f === 'autoOpen') { ed.autoOpen = t.checked; return; }   // v46〜
+    else if (f === 'color') { ed.color = t.value; return; }   // v47〜
     else if (f === 'person') {
       var i = ed.people.indexOf(t.value);
       if (t.checked && i < 0) ed.people.push(t.value); else if (!t.checked && i >= 0) ed.people.splice(i, 1);
@@ -2289,7 +2345,7 @@
       if (ed.endDate < ed.startDate) { if (f === 'startDate') ed.endDate = ed.startDate; else ed.startDate = ed.endDate; }
       lgFitNights(ed);
     }
-    if (f === 'type' || f === 'allDay' || f === 'startDate' || f === 'endDate') renderPlanEditor();
+    if (f === 'type' || f === 'allDay' || f === 'startDate' || f === 'endDate' || f === 'venue') renderPlanEditor();   // venue：色の「自動（今は◯◯）」を直す（v47〜）
   }
 
   function renderPlanEditor() {
@@ -2319,7 +2375,8 @@
       (ed.allDay ? '' : '<div class="pl-dates"><label>開始時刻 <input type="time" step="300" data-ed="startTime" value="' + esc(ed.startTime) + '"></label>' +
         '<label>終了時刻 <input type="time" step="300" data-ed="endTime" value="' + esc(ed.endTime) + '"></label></div>') +
       '<label>スタッフ向けメモ <textarea data-ed="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(ed.memo) + '</textarea></label>' +
-      calDescField('ed', ed.calDesc) + '</div>';
+      calDescField('ed', ed.calDesc) +
+      (NO_COLOR_TYPES.indexOf(ed.type) < 0 ? colorPickerHtml('ed', ed.color || '', autoColorJs(ed), 'edColor') : '') + '</div>';
     // 担当（または不在の人）
     var cands = staffCands(dates);
     if (ed.type === '不在') {
@@ -2413,7 +2470,7 @@
     Object.keys(src.assign || {}).forEach(function (k) { if ((src.assign[k] || []).length) assign[k] = src.assign[k].slice(); });
     openPlanEditor({
       id: null, status: '', dup: true, type: src.type, name: src.name, venue: src.venue || '', startDate: '', endDate: '',
-      allDay: !!src.allDay, startTime: src.allDay ? '' : src.startTime, endTime: src.allDay ? '' : src.endTime, memo: src.memo || '', calDesc: src.calDesc || '',
+      allDay: !!src.allDay, startTime: src.allDay ? '' : src.startTime, endTime: src.allDay ? '' : src.endTime, memo: src.memo || '', calDesc: src.calDesc || '', color: src.color || '',
       assign: assign, assignDays: {}, people: (src.people || []).slice()
     });
     S.plan.msg = { kind: 'ok', text: '「' + src.name + '」を複製しました。日付を選んで保存してください（まだ保存していません）' };
@@ -2427,7 +2484,7 @@
     if (!inPeriod(to)) to = periodLastDay();
     p.bulk = {
       opId: newOpId(), from: from, to: to, wds: [], add: [], drop: [], pick: {}, confirm: false, calMonth: from.slice(0, 7),
-      type: '練習', name: '', venue: '', allDay: true, startTime: '', endTime: '', memo: '', calDesc: '', assign: {}, people: [], status: '下書き',
+      type: '練習', name: '', venue: '', allDay: true, startTime: '', endTime: '', memo: '', calDesc: '', color: '', assign: {}, people: [], status: '下書き',
       dayAssign: {}, dayPeople: {}, openDay: null   // 日ごとの担当・不在の人（v42〜。無い日は共通のまま）
     };
     if (seed) Object.keys(seed).forEach(function (k) { p.bulk[k] = seed[k]; });
@@ -2446,7 +2503,7 @@
     var nm = ed.name;
     openPlanBulk({
       type: ed.type, name: ed.name || '', venue: ed.venue || '', allDay: !!ed.allDay, startTime: ed.allDay ? '' : (ed.startTime || ''), endTime: ed.allDay ? '' : (ed.endTime || ''),
-      memo: ed.memo || '', calDesc: ed.calDesc || '', assign: assign, people: ed.type === '不在' ? (ed.people || []).slice() : []
+      memo: ed.memo || '', calDesc: ed.calDesc || '', color: ed.color || '', assign: assign, people: ed.type === '不在' ? (ed.people || []).slice() : []
     });
     S.plan.msg = { kind: 'ok', text: '「' + nm + '」の中身でまとめて登録を開きました。日を選んでください（まだ作っていません）' };
     renderPlan();
@@ -2556,7 +2613,8 @@
       (bk.allDay ? '' : '<div class="pl-dates"><label>開始時刻 <input type="time" step="300" data-pb="startTime" value="' + esc(bk.startTime) + '"></label>' +
         '<label>終了時刻 <input type="time" step="300" data-pb="endTime" value="' + esc(bk.endTime) + '"></label></div>') +
       '<label>スタッフ向けメモ <textarea data-pb="memo" maxlength="200" rows="2" placeholder="スタッフに見えます（家族には出ません）">' + esc(bk.memo) + '</textarea></label>' +
-      calDescField('pb', bk.calDesc) + '</div>';
+      calDescField('pb', bk.calDesc) +
+      (NO_COLOR_TYPES.indexOf(bk.type) < 0 ? colorPickerHtml('pb', bk.color || '', autoColorJs(bk), 'pbColor') : '') + '</div>';
     // 2. 共通の担当（不在なら不在の人）
     if (bk.type === '不在') {
       h += '<h3 class="pl-h">2. 不在の人（全部の日の共通）</h3><p class="hint">日ごとに変えるときは、下の日の一覧の［この日を変える］から。</p>' +
@@ -2647,7 +2705,7 @@
   // ★ 検査に通らない依頼は理由を出し、最初はチェックを外す（取り込むと「要修正」と理由がシートに戻る）。1回50件まで
   // ★ 取り込みのあとは1件ずつ保存したときと同じ。参加の受付・カレンダー反映は始めない
 
-  var REQ_FIELDS = [['type', '種類'], ['name', '名前'], ['venue', '会場'], ['dates', '日付'], ['time', '時間'], ['who', '担当'], ['memo', 'メモ'], ['calDesc', 'カレンダーの説明'], ['status', '状態']];
+  var REQ_FIELDS = [['type', '種類'], ['name', '名前'], ['venue', '会場'], ['dates', '日付'], ['time', '時間'], ['who', '担当'], ['memo', 'メモ'], ['calDesc', 'カレンダーの説明'], ['color', '色'], ['status', '状態']];
   function openPlanReq() {
     var p = S.plan;
     p.req = { status: 'loading', items: [], pick: {}, confirm: false, opId: newOpId(), results: null };
@@ -2678,7 +2736,7 @@
         var multi = o.startDate !== o.endDate;
         return staffNm(a.staffId) + '（' + (ROLE_SHORT[a.role] || a.role) + (multi && a.days ? '・' + shortDays(a.days) : '') + '）';
       }).join('・') : '未定');
-    return { type: tp, name: o.name || '', venue: o.venue || 'なし', dates: sd + ed, time: o.allDay ? '終日' : (o.startTime + '–' + o.endTime), who: who, memo: o.memo || 'なし', calDesc: o.calDesc || 'なし', status: o.status || '' };
+    return { type: tp, name: o.name || '', venue: o.venue || 'なし', dates: sd + ed, time: o.allDay ? '終日' : (o.startTime + '–' + o.endTime), who: who, memo: o.memo || 'なし', calDesc: o.calDesc || 'なし', color: o.color ? gcName(o.color) : '自動', status: o.status || '' };
   }
   function reqItemHtml(it, withPick, dis) {
     var q = S.plan.req, on = !!q.pick[it.id];
@@ -2697,7 +2755,8 @@
       } else {
         h += '<p class="pq-sub">' + esc(a.dates + '　' + a.name + '（' + a.type + '・' + a.time + (a.venue !== 'なし' ? '・' + a.venue : '') + '）') + '</p>' +
           '<p class="pq-sub muted">' + esc(a.who + '／' + (a.status === '確定' ? '確定で作る' + (PARTIAL_DEFAULT.hasOwnProperty(it.after.type) ? (it.after.autoOpen === false ? '（受付は始めない）' : '（受付も始める）') : '') : '下書きで作る') + (a.memo !== 'なし' ? '／メモ：' + a.memo : '')) + '</p>' +
-          (a.calDesc !== 'なし' ? '<p class="pq-sub muted">カレンダーの説明：' + esc(a.calDesc) + '</p>' : '');
+          (a.calDesc !== 'なし' ? '<p class="pq-sub muted">カレンダーの説明：' + esc(a.calDesc) + '</p>' : '') +
+          (a.color !== '自動' ? '<p class="pq-sub muted">色：' + esc(a.color) + '</p>' : '');
       }
     }
     if (it.answers) {   // 参加の回答がある予定の日時を変える依頼（v45〜）
@@ -2955,6 +3014,7 @@
     } else if (f === 'pick') { bk.pick[t.value] = t.checked; }
     else if (f === 'status') { bk.status = t.value === '確定' ? '確定' : '下書き'; renderPlan(); return; }   // 確定で作る（v43〜）
     else if (f === 'autoOpen') { bk.autoOpen = t.checked; return; }   // v46〜
+    else if (f === 'color') { bk.color = t.value; return; }   // v47〜
     else if (f === 'person') {
       var pi = bk.people.indexOf(t.value);
       if (t.checked && pi < 0) bk.people.push(t.value); else if (!t.checked && pi >= 0) bk.people.splice(pi, 1);
@@ -2976,7 +3036,7 @@
       fit(bk.assign);
       Object.keys(bk.dayAssign).forEach(function (d) { fit(bk.dayAssign[d]); });   // 種類で使えなくなった役割は日ごとの分からも外す
     } else bk[f] = t.value;
-    if (f === 'startTime' || f === 'endTime' || f === 'venue') return;
+    if (f === 'startTime' || f === 'endTime') return;
     p.msg = null;
     renderPlan();
   }
@@ -2996,7 +3056,7 @@
     var body = {
       month: S.month, opId: bk.opId, days: days, type: bk.type, name: bk.name, venue: bk.venue, allDay: !!bk.allDay,
       startTime: bk.allDay ? '' : bk.startTime, endTime: bk.allDay ? '' : bk.endTime, memo: bk.memo, calDesc: bk.calDesc || '', status: bk.status === '確定' ? '確定' : '下書き',
-      autoOpen: bk.autoOpen !== false
+      autoOpen: bk.autoOpen !== false, color: bk.color || ''
     };
     p.busy = true;
     p.msg = { kind: 'busy', text: dates.length + '件作っています…' };
@@ -3076,6 +3136,7 @@
     if (PARTIAL_DEFAULT.hasOwnProperty(ed.type)) body.partial = planPartial(ed);
     if (answerMode === 'keep' || answerMode === 'recheck') body.answerMode = answerMode;
     body.autoOpen = ed.autoOpen !== false;   // 確定したらすぐ受付を始める（v46〜）
+    body.color = ed.color || '';   // 色（v47〜。''＝自動）
     try { var lgBody = planLodgingBody(ed); } catch (err) { p.msg = { kind: 'ng', text: '⚠ ' + err.message }; renderPlan(); return; }
     if (lgBody !== undefined) body.lodging = lgBody;
     var label = (status === '下書き' ? '下書きで保存しました' : status === '中止' ? '中止にしました' : '確定しました') +
@@ -3663,7 +3724,10 @@
 
   // S-air の練習会は黄色（v39〜・城さん 2026-10-21。Google カレンダー「MIC 予定（アプリ）」も同じ黄色）
   function calIsSair(ev) { return ev.type === '練習' && ev.venue === 'S-air'; }
-  function calBarClass(ev) { return 'cb cb-' + (calIsSair(ev) ? 'sair' : ({ '練習': 'prac', '合宿': 'camp', '大会': 'comp' })[ev.type]); }
+  function calBarClass(ev) {
+    if (ev.color !== undefined) return 'cb gc-' + (ev.color || '0');   // 色（v47〜。サーバーが決めた色）
+    return 'cb cb-' + (calIsSair(ev) ? 'sair' : ({ '練習': 'prac', '合宿': 'camp', '大会': 'comp' })[ev.type]);
+  }
 
   function renderCalTab() {
     var tab = byId('tab-cal');
@@ -3675,8 +3739,7 @@
     tab.querySelector('.cal-label').textContent = S.calMonth.slice(0, 4) + '年' + (+S.calMonth.slice(5, 7)) + '月';
     tab.querySelector('.cal-prev').disabled = months.indexOf(S.calMonth) <= 0;
     tab.querySelector('.cal-next').disabled = months.indexOf(S.calMonth) >= months.length - 1;
-    byId('calLegend').innerHTML = Object.keys(CAL_TYPES).map(function (t) { return '<span class="cl"><i class="' + calBarClass({ type: t }) + '"></i>' + CAL_TYPES[t] + '</span>'; }).join('') +
-      '<span class="cl"><i class="' + calBarClass({ type: '練習', venue: 'S-air' }) + '"></i>S-airの練習会</span>' +
+    byId('calLegend').innerHTML = COLOR_GROUPS.map(function (g) { return '<span class="cl"><i class="cb gc-' + (g[0] || '0') + '"></i>' + g[1] + '</span>'; }).join('') +   // v47〜
       (S.family ? '<span class="cl"><span class="cm cm-yes">参</span>参加 <span class="cm cm-no">不</span>不参加 <span class="cm cm-un">未</span>未回答（自分の家族）</span>'
         : S.me.staffId ? '<span class="cl">自分の○△×・<b>担</b>＝自分の担当</span>' : '');
     if (S.calView === 'list') return renderCalList();

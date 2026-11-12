@@ -833,3 +833,32 @@ button.btn-busy { opacity: .6; cursor: progress; pointer-events: none; }
 /* 確定したらすぐ受付を始める（v46〜） */
 .pb-ao { display: flex; align-items: center; gap: 6px; min-height: 40px; font-size: 15px; margin-top: 4px; }
 .pb-ao input { width: 22px; height: 22px; }
+/* 予定の色（v47〜）：Google カレンダーの予定の色と同じ。gc-0＝色なし（スレート） */
+.gc-0 { --gc: #5f6b7d; --gt: #fff; --gd: #4a5566; }
+.gc-1 { --gc: #7986cb; --gt: #fff; --gd: #4f5ba8; }
+.gc-2 { --gc: #33b679; --gt: #fff; --gd: #1f7f52; }
+.gc-3 { --gc: #8e24aa; --gt: #fff; --gd: #8e24aa; }
+.gc-4 { --gc: #e67c73; --gt: #fff; --gd: #b8473f; }
+.gc-5 { --gc: #f6bf26; --gt: #3e2f00; --gd: #8a6a00; }
+.gc-6 { --gc: #f4511e; --gt: #fff; --gd: #c23a0e; }
+.gc-7 { --gc: #039be5; --gt: #fff; --gd: #0277bd; }
+.gc-8 { --gc: #616161; --gt: #fff; --gd: #616161; }
+.gc-9 { --gc: #3f51b5; --gt: #fff; --gd: #3f51b5; }
+.gc-10 { --gc: #0b8043; --gt: #fff; --gd: #0b8043; }
+.gc-11 { --gc: #d50000; --gt: #fff; --gd: #d50000; }
+.cb[class*="gc-"] { background: var(--gc); color: var(--gt); }
+.band[class*="gc-"] { background: var(--gc); color: var(--gt); }
+.band.b-app[class*="gc-"] { box-shadow: inset 3px 0 0 rgba(0, 0, 0, .45); }
+.band.b-draft[class*="gc-"] { background: #fff; color: var(--gd); border: 1px dashed var(--gc); box-shadow: none; }
+.cp { display: flex; flex-wrap: wrap; gap: 4px 10px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin: 4px 0; }
+.cp legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
+.cp-opt { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 4px; min-height: 36px; font-size: 14px !important; color: var(--ink) !important; }
+.cp-opt input { width: 20px; height: 20px; }
+.cp-sw { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: var(--gc); }
+.cc-list { list-style: none; margin: 6px 0 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; max-height: 480px; overflow-y: auto; }
+.cc-list li { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-top: 1px solid var(--line); }
+.cc-list li:first-child { border-top: 0; }
+.cc-sw { flex: none; width: 14px; height: 14px; border-radius: 50%; margin-top: 3px; background: var(--gc); }
+.cc-main { display: flex; flex-direction: column; font-size: 14px; overflow-wrap: anywhere; }
+.cc-main small { color: var(--muted); font-size: 12px; }
+.cc-manual { color: var(--ng); }
