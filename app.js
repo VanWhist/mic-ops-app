@@ -157,9 +157,12 @@
   function switchAthlete(id) {
     if (id === S.curAthlete) return;
     if (S.inflight || pendingCount()) {
-      flush().then(function () { if (!pendingCount() && !S.inflight) switchAthlete(id); });
+      // 保存の送信中・保存待ちがある：終わったら切り替える（v50〜。前は送信中に押すと切り替わらなかった）
+      S.wantAthlete = id;
+      if (!S.inflight) flush();
       return;
     }
+    S.wantAthlete = null;
     S.curAthlete = id;
     S.me.staffId = id;
     S.noteDates = [];
@@ -267,7 +270,8 @@
     setReplaced: ['変更中…', '変更しました'], deaconConfirm: ['確定中…', '確定しました'],
     saveAppEventsBulk: ['作成中…', '作りました'],   // まとめて登録（v41〜）
     confirmAppEvents: ['確定中…', '確定しました'],   // 下書きをまとめて確定（v43〜）
-    planRequestsApply: ['処理中…', null]   // Coworkからの依頼（v44〜。結果は一覧の上に出す）
+    planRequestsApply: ['処理中…', null],   // Coworkからの依頼（v44〜。結果は一覧の上に出す）
+    colorCheck: ['読み込み中…', null]   // 色の確認（保存ではない。v50〜）
   };
   var BTN_OK_MS = 2500, BTN_NG_MS = 10000;
   var btnPressed = null, btnBusy = [], btnFlash = [], btnApplying = false;
@@ -529,8 +533,12 @@
     }).then(function () {
       S.inflight = false;
       try { renderAll(); renderTabsBadge(); } catch (e2) { if (window.console) console.error(e2); }   // ○を付けた日の受付中の予定が「参加しますか？」に増える
-      if (!pendingCount()) { S.flushLoop = 0; return; }
-      if (S.error) return;
+      if (!pendingCount()) {
+        S.flushLoop = 0;
+        if (S.wantAthlete) { var want = S.wantAthlete; S.wantAthlete = null; switchAthlete(want); }   // 送信中に押された選手タブ（v50〜）
+        return;
+      }
+      if (S.error) { S.wantAthlete = null; return; }
       // 送り直し：減っていれば（件数が多いときの続き）すぐ。減らないときは間隔を伸ばし、FLUSH_LOOP_MAX 回で止める（v48〜）
       if (pendingCount() < before) S.flushLoop = 0; else S.flushLoop = (S.flushLoop || 0) + 1;
       if (S.flushLoop > FLUSH_LOOP_MAX) {
@@ -549,7 +557,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261112d';
+  var APP_VERSION = '20261112e';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -1257,7 +1265,7 @@
     byId('dcVenue').innerHTML = '<option value="">会場（未定）</option>' + S.venues.map(function (v) { return '<option>' + esc(v) + '</option>'; }).join('');
     var months = monthsOf(S.period);
     byId('dcDate').min = months[0] + '-01';
-    byId('dcDate').max = months[months.length - 1] + '-31';
+    byId('dcDate').max = daysOf(months[months.length - 1]).slice(-1)[0];   // その月の最後の日（v50〜。前は常に31日）
     byId('calSyncBtn').addEventListener('click', runCalSync);
     byId('joinImportBox').hidden = false;
     byId('colorCheckBox').hidden = false;   // 色の確認（v47〜）
@@ -1309,7 +1317,7 @@
   function runCalSync() {
     if (S.calBusy) return;
     S.calBusy = true;
-    var sum = { created: 0, updated: 0, deleted: 0, failed: 0 };
+    var sum = { created: 0, updated: 0, deleted: 0, failed: 0, stuck: 0 };
     var progress = function () { return '作成' + sum.created + '・更新' + sum.updated + '・削除' + sum.deleted + (sum.failed ? '・失敗' + sum.failed : ''); };
     S.calMsg = { kind: 'busy', text: '反映中…' };
     var autoList = [];
@@ -1319,11 +1327,14 @@
         Object.keys(sum).forEach(function (k) { sum[k] += r.result[k] || 0; });
         (r.autoOpened || []).forEach(function (x) { autoList.push(x); });   // v46〜
         S.cal = Object.assign({}, S.cal, { syncedAt: r.syncedAt || (S.cal && S.cal.syncedAt), dirty: r.dirty });
+        // 続きがあるのに1件も進まなかった（全部失敗）ときは、続けない（v50〜。前は止まらなかった）
+        var moved = (r.result.created || 0) + (r.result.updated || 0) + (r.result.deleted || 0);
+        if (r.more && !moved) { sum.stuck = 1; return; }
         if (r.more) { S.calMsg = { kind: 'busy', text: '反映中…（' + progress() + '）' }; renderCalBar(); return step(); }
       });
     };
     step().then(function () {
-      S.calMsg = sum.failed
+      S.calMsg = sum.failed || sum.stuck
         ? { kind: 'ng', text: '⚠ 一部反映できませんでした（' + progress() + '）。もう一度押してください' }
         : { kind: 'ok', text: '✓ 反映しました（' + progress() + '）最終反映：' + stampLabel(S.cal.syncedAt) +
           (autoList.length ? '。MICスケジュールの新しい予定' + autoList.length + '件の参加の受付も始めました（' + autoList.map(function (x) { return x.title; }).join('・') + '）' : '') };
@@ -1429,6 +1440,9 @@
       var b = e.target.closest('[data-lg]');
       if (b && !b.disabled) lgClick(b);
     });
+    byId('plEditor').addEventListener('focusout', function () {   // 入力を離れたら、止めていた描き直しをする（v50〜）
+      setTimeout(function () { if (S.plan && S.plan.deferRender && !planTyping()) { S.plan.deferRender = false; renderPlan(); } }, 0);
+    });
     byId('evReload').addEventListener('click', function () {
       // 空き状況・役割も読み直す（担当の人が×に変えたかの警告は、これを元に出している）。
       // 管理者はカレンダーも読み直す（サーバー側の10分キャッシュを使わない）
@@ -1454,7 +1468,7 @@
         return;
       }
       if (act === 'lg-edit') { evLgOpen(key); return; }   // 宿泊を設定（v27〜）
-      if (act === 'lg-cancel') { S.evLg = null; renderEvents(); return; }
+      if (act === 'lg-cancel') { if (formDirty(S.evLg) && !window.confirm(DISCARD_MSG)) return; S.evLg = null; renderEvents(); return; }   // v50〜
       if (act === 'lg-save') { evLgSave(key); return; }
       if (act === 'answer-partial') { adminOp('setAnswerPartial', { eventKey: key, partial: b.dataset.on === '1' }); return; }
       if (act === 'answer-open') {
@@ -1798,7 +1812,18 @@
       if (staleSince('ev:' + month, t0)) return;
       var msg = e.code === 'bad_request' && /不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です。更新後に「最新にする」を押してください' : e.message;
       S.events[month] = { status: 'error', error: msg, data: cur && cur.data, at: cur && cur.at };
-    }).then(function () { if (S.tab === 'events') renderSafe(); else renderEvents(); if (S.tab === 'plan') renderPlan(); if (S.tab === 'cal') renderCalTab(); });
+    }).then(function () { if (S.tab === 'events') renderSafe(); else renderEvents(); if (S.tab === 'plan') renderPlanLoaded(); if (S.tab === 'cal') renderCalTab(); });
+  }
+
+  /** 予定の読み込みが終わったときの計画の描き直し（v50〜）：1件編集の欄に入力中（日本語の変換中も）なら描き直さず、欄を離れたときに描く */
+  function planTyping() {
+    var el = document.activeElement, box = byId('plEditor');
+    return !!(S.plan && S.plan.ed && !S.plan.bulk && !S.plan.conf && !S.plan.req && el && box && box.contains(el) &&
+      (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|search|time|date|number|)$/.test(el.type || ''))));
+  }
+  function renderPlanLoaded() {
+    if (planTyping()) { S.plan.deferRender = true; return; }
+    renderPlan();
   }
 
   /** MICスケジュールの新しい予定の受付を自動で始めたとき（v46〜）。予定と担当・計画のどちらにも出す */
@@ -2036,15 +2061,21 @@
     var x = new Date(Date.UTC(p[0], p[1] - 1, p[2] + n));
     return x.getUTCFullYear() + '-' + ('0' + (x.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + x.getUTCDate()).slice(-2);
   }
+  var DATES_MAX = 62;   // 1件の予定・期間の表に出す日数の上限（サーバーの「期間は62日まで」と同じ）
   function datesBetween(a, b) {
     var out = [];
-    for (var d = a; d <= b && out.length < 62; d = addDays(d, 1)) out.push(d);
+    for (var d = a; d <= b && out.length < DATES_MAX; d = addDays(d, 1)) out.push(d);
     return out;
   }
-  function monthsBetween(a, b) {
-    var out = [];
-    monthsOf(S.period).forEach(function (m) { if (m >= a.slice(0, 7) && m <= b.slice(0, 7)) out.push(m); });
-    return out;
+  /** 本当の日数（打ち切らない）。日付の形でなければ 0 */
+  function dayCount(a, b) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(a || '') || !/^\d{4}-\d{2}-\d{2}$/.test(b || '') || b < a) return 0;
+    return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000) + 1;
+  }
+  /** 62日で打ち切ったときの知らせ（v50〜）。打ち切っていなければ空 */
+  function cutNote(a, b) {
+    var n = dayCount(a, b);
+    return n > DATES_MAX ? '<span class="warn cut-note">期間が' + n + '日あります。出しているのは最初の' + DATES_MAX + '日（' + md(addDays(a, DATES_MAX - 1)) + 'まで）です</span>' : '';
   }
   function planMonths() {
     var ms = [S.month];
@@ -2241,7 +2272,7 @@
     var h = '<div class="pl-detail">' +
       '<div class="pl-range"><label>開始日 <input type="date" data-pd="start" value="' + p.start + '" min="' + lim.min + '" max="' + lim.max + '"></label>' +
       '<label>終了日 <input type="date" data-pd="end" value="' + end + '" min="' + lim.min + '" max="' + lim.max + '"></label>' +
-      '<span class="muted">' + dates.length + '日間' + (p.pick === 'end' ? '（終了日をタップ）' : '') + '</span></div>';
+      '<span class="muted">' + dates.length + '日間' + (p.pick === 'end' ? '（終了日をタップ）' : '') + '</span>' + cutNote(p.start, end) + '</div>';
     h += '<div class="pl-break">' + breakBox('スタッフ', br.staff, S.staff.length) + breakBox('選手', br.ath, (S.athletes || []).length) + '</div>';
     // 日別の○△×
     h += '<div class="pl-view" role="radiogroup" aria-label="表に出す人"><label><input type="radio" name="plView" value="staff"' + (p.view === 'staff' ? ' checked' : '') + '> スタッフ（役割順）</label>' +
@@ -2286,18 +2317,28 @@
 
   function newOpId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
 
+  /** 入力の中身の写し（v50〜）：開いたときと比べて、変更があるかを見る。画面の都合の値（確認中・開いている月など）は入れない */
+  var SIG_SKIP = { snap: 1, opId: 1, confirm: 1, calMonth: 1, openDay: 1, ansAsk: 1, orig: 1, ansStats: 1 };
+  function formSig(o) { return JSON.stringify(o, function (k, v) { return SIG_SKIP[k] ? undefined : v; }); }
+  function formDirty(o) { return !!(o && o.snap !== undefined && formSig(o) !== o.snap); }
+  var DISCARD_MSG = '変更した内容があります。保存せずに戻りますか？';
+
   function openPlanEditor(ed) {
     ed.opId = newOpId();
+    // まとめて登録・まとめて確定・Coworkからの依頼を開いたままでも、編集画面を前に出す（v50〜。前は裏に隠れた）
+    S.plan.bulk = null; S.plan.conf = null; S.plan.req = null;
     S.plan.ed = ed;
     S.plan.msg = null;
     S.tab = 'plan';
     renderAll();
+    ed.snap = formSig(ed);   // 描いたあと（初期値が入ったあと）の形を覚える
     window.scrollTo(0, 0);
   }
 
   function openPlanEditorFor(key) {
     var ev = planEventsAll().filter(function (x) { return x.key === key; })[0];
     if (!ev || ev.cal !== 'アプリ') return;
+    if (formDirty(S.plan.bulk) && !window.confirm('まとめて登録に入力中の内容があります。消して、この予定の編集に移りますか？')) return;   // v50〜
     var t = function (s) { return s.length > 10 ? s.slice(11, 16) : ''; };
     var assign = {};
     var assignDays = {};
@@ -2351,6 +2392,7 @@
       planDupToBulk();
     } else if (act === 'back') {
       if (p.busy) return;
+      if (formDirty(p.ed) && !window.confirm(DISCARD_MSG)) return;   // 変更があるときだけ確かめる（v50〜）
       p.ed = null; renderPlan();
     } else if (act === 'role') {
       var ed = p.ed, sid = b.dataset.staff, role = b.dataset.role;
@@ -2450,7 +2492,7 @@
       '<label>名前 <input type="text" data-ed="name" maxlength="40" value="' + esc(ed.name) + '" placeholder="例：白馬合宿"></label>' +
       '<label>会場 <select data-ed="venue"><option value="">なし（会場で絞らない）</option>' + S.venues.map(function (v) { return '<option' + (ed.venue === v ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join('') + '</select></label>' +
       '<div class="pl-dates"><label>開始日 <input type="date" data-ed="startDate" value="' + ed.startDate + '" min="' + lim.min + '" max="' + lim.max + '"></label>' +
-      '<label>終了日 <input type="date" data-ed="endDate" value="' + ed.endDate + '" min="' + lim.min + '" max="' + lim.max + '"></label></div>' +
+      '<label>終了日 <input type="date" data-ed="endDate" value="' + ed.endDate + '" min="' + lim.min + '" max="' + lim.max + '"></label>' + (hasDates ? cutNote(ed.startDate, ed.endDate) : '') + '</div>' +
       '<label class="chk"><input type="checkbox" data-ed="allDay"' + (ed.allDay ? ' checked' : '') + '> 終日</label>' +
       (PARTIAL_DEFAULT.hasOwnProperty(ed.type) ? '<label class="chk"><input type="checkbox" data-ed="partial"' + (planPartial(ed) ? ' checked' : '') + '> 家族の参加の回答で、時間の指定を受け付ける</label>' : '') +
       // 確定したらすぐ受付を始める（v46〜）：新しい予定・下書きのときだけ（確定の瞬間にだけ効く）
@@ -2574,6 +2616,7 @@
     p.ed = null;
     p.msg = null;
     renderPlan();
+    p.bulk.snap = formSig(p.bulk);   // 開いたときの形（v50〜）
     window.scrollTo(0, 0);
   }
 
@@ -3036,7 +3079,7 @@
 
   function bulkClick(b) {
     var p = S.plan, bk = p.bulk, act = b.dataset.pb;
-    if (act === 'back') { if (p.busy) return; p.bulk = null; p.msg = null; renderPlan(); return; }
+    if (act === 'back') { if (p.busy) return; if (formDirty(p.bulk) && !window.confirm(DISCARD_MSG)) return; p.bulk = null; p.msg = null; renderPlan(); return; }   // v50〜
     if (act === 'cprev' || act === 'cnext') {
       var ms = monthsOf(S.period), i = ms.indexOf(bk.calMonth) + (act === 'cprev' ? -1 : 1);
       if (i >= 0 && i < ms.length) { bk.calMonth = ms[i]; if (!S.events[bk.calMonth] || S.events[bk.calMonth].status === 'cached') loadEvents(bk.calMonth); }
@@ -3194,9 +3237,11 @@
     if (!edHasDates(ed)) { p.msg = { kind: 'ng', text: '⚠ 開始日と終了日を選んでください' }; renderPlan(); return; }
     if (String(ed.calDesc || '').length > CAL_DESC_MAX) { p.msg = { kind: 'ng', text: '⚠ カレンダーの説明は' + CAL_DESC_MAX + '字までです' }; renderPlan(); return; }
     if (!ed.allDay && (!ed.startTime || !ed.endTime)) { p.msg = { kind: 'ng', text: '⚠ 時刻を入れるか、「終日」にしてください' }; renderPlan(); return; }
+    if (dayCount(ed.startDate, ed.endDate) > DATES_MAX) { p.msg = { kind: 'ng', text: '⚠ 期間は' + DATES_MAX + '日までです（いまは' + dayCount(ed.startDate, ed.endDate) + '日）' }; renderPlan(); return; }   // v50〜：黙って打ち切らない
     // まとめて登録と同じ検査（v49〜）。サーバーでも同じ検査をしている
     if (ed.endDate < ed.startDate) { p.msg = { kind: 'ng', text: '⚠ 終了日は開始日と同じか後にしてください' }; renderPlan(); return; }
     if (!ed.allDay && ed.startDate === ed.endDate && ed.endTime <= ed.startTime) { p.msg = { kind: 'ng', text: '⚠ 終了の時刻は開始より後にしてください' }; renderPlan(); return; }
+    if (status === '下書き' && ed.id && ed.status === '確定' && !window.confirm('この予定を下書きに戻します。\n家族とスタッフから見えなくなります。よろしいですか？')) return;   // v50〜
     if (status === '中止' && ed.status !== '中止' && !window.confirm('この予定を中止にします。\nカレンダーからは次の反映で消え、家族にも出なくなります。よろしいですか？')) return;
     // 参加の回答がある予定の日時を変えるとき：回答を残すか、答え直してもらうかを選んでから保存（v45〜）
     var chg = ed.id ? planDateChange(ed) : '';
@@ -3241,7 +3286,6 @@
 
   function planOp(action, body, label, linkEvents) {
     var p = S.plan, ed = p.ed;
-    var touched = ed ? monthsBetween(ed.startDate, ed.endDate) : [];
     p.busy = true;
     p.msg = { kind: 'busy', text: '保存中…' };
     renderPlan();
@@ -3660,10 +3704,11 @@
 
   function staffOp(action, payload, done) {
     S.stBusy = true;
-    setStStatus('busy', '保存中…');
+    var show = action === 'staffUrl';   // URLを表示するだけ（保存ではない。v50〜）
+    setStStatus('busy', show ? '表示中…' : '保存中…');
     renderStaffAdmin();
     api(action, payload).then(function (r) {
-      setStStatus('ok', '✓ 保存しました');
+      setStStatus('ok', show ? '✓ URLを表示しました' : '✓ 保存しました');
       done(r);
     }, function (e) {
       setStStatus('ng', '⚠ できませんでした：' + e.message);
@@ -4031,6 +4076,7 @@
       var b = e.target.closest('[data-tk]');
       if (!b || b.disabled) return;
       var act = b.dataset.tk;
+      if (act === 'back' && String(S.talkDraft || '').trim() && !window.confirm('書きかけの文があります。送らずに戻りますか？')) return;   // v50〜
       if (act === 'back') { S.talkOpen = null; S.talkOrder = null; S.talkMsg = null; loadTalkSummary(); renderTalk(); window.scrollTo(0, 0); }
       else if (act === 'open') openTalk(b.dataset.key, b.dataset.month);
       else if (act === 'grp') { S.talkGroup = b.dataset.g; S.talkMsg = null; renderTalk(); }
@@ -4936,6 +4982,7 @@
     if (!S.evLg.lodging.nights.length) S.evLg.lodging.nights = lgDefaultNights(S.evLg);
     if (!S.lodgings) loadLodgings(renderEvents);
     renderEvents();
+    S.evLg.snap = formSig(S.evLg);   // 開いたときの形（v50〜）
   }
 
   function evLgSave(key) {
