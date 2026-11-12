@@ -476,6 +476,17 @@
 
   function pendingCount() { return Object.keys(S.pending).length; }
 
+  // 古い応答を捨てる（v49〜）：読み込みを出したあとに、同じ場所へ保存の結果を入れたら、その読み込みの応答は古いので使わない。
+  //   場所の名前：'up'（家族の練習会など）・'ev:2026-11'（予定の月）・'talk'（開いているトーク）・'talksum'（トークの一覧）
+  function reqTick() { S.tickN = (S.tickN || 0) + 1; return S.tickN; }
+  function markApplied(k) { S.appliedAt = S.appliedAt || {}; S.appliedAt[k] = reqTick(); }
+  function staleSince(k, t0) { return ((S.appliedAt || {})[k] || 0) > t0; }
+  /** 保存の結果（その月の予定）を入れる。読み込み中の古い応答に上書きされないよう印を付ける */
+  function setEvents(month, r) { S.events[month] = { status: 'ok', data: r, at: Date.now() }; markApplied('ev:' + month); }
+  function setUpcoming(r) { S.upcoming = { status: 'ok', data: r }; markApplied('up'); }
+  /** 予定の「月」（保存の宛先）：期間内の最初の日の月。期間内の日が無い予定は最初の日の月（v49〜） */
+  function evMonthOf(ev) { var d = ev.dates.filter(inPeriod)[0] || ev.dates[0] || ''; return d.slice(0, 7); }
+
   var FLUSH_LOOP_MAX = 6;   // ○△×の送り直し：続けて減らないときの上限（間隔は 0.5→1→2→4→8→16秒）
   function scheduleFlush(delay) {
     clearTimeout(S.timer);
@@ -538,7 +549,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261112c';
+  var APP_VERSION = '20261112d';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -1016,8 +1027,9 @@
     var btn = byId('reloadBtn');
     btn.disabled = true;
     btn.textContent = '読み込み中…';
+    var t0 = Date.now();
     api('bootstrap').then(function (r) {
-      applyBoot(r);
+      applyBoot(r, t0);   // 取得中に保存した○△×・役割は手元の値を残す（v49〜。refreshBoot と同じ）
       btn.textContent = '最新にする';
     }, function (e) {
       btn.textContent = '読み込めませんでした（もう一度）';
@@ -1081,7 +1093,7 @@
     if (!d || d.slice(0, 7) !== S.month) { el.hidden = true; return; }
     var by = { '○': [], '△': [], '×': [], '': [] };
     var rows = gridRows();
-    rows.forEach(function (st) { by[gridVal(st.staffId, d).s].push(st); });
+    rows.forEach(function (st) { (by[gridVal(st.staffId, d).s] || by['']).push(st); });   // 知らない値は未回答として扱う（v49〜）
 
     var h = '<h3>' + longDate(d) + '</h3>';
     if (S.family || gridAthletes()) {
@@ -1509,7 +1521,12 @@
     if (cur && (cur.status === 'loading' || (cur.status === 'ok' && !force))) { renderUpcoming(); return; }
     S.upcoming = { status: 'loading', data: cur && cur.data };
     renderUpcoming();
-    api('upcoming').then(function (r) { S.upcoming = { status: 'ok', data: r }; saveCache(); }, function (e) {
+    var t0 = reqTick();
+    api('upcoming').then(function (r) {
+      if (staleSince('up', t0)) return;   // 読み込みのあとに保存した → この応答は古い（v49〜）
+      S.upcoming = { status: 'ok', data: r }; saveCache();
+    }, function (e) {
+      if (staleSince('up', t0)) return;
       S.upcoming = { status: 'error', error: /不明な操作|使えません/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です' : e.message, data: cur && cur.data };
     }).then(function () {
       // 備考を打っている途中なら描き直さない（前回の分を出している間に打ち始めても、文字が消えないように。v34〜）。入力欄を離れたら描く
@@ -1666,17 +1683,19 @@
   function answerEvent(key, ids, days) {
     var ev = upcomingEvent(key);
     if (!ev) return;
-    var month = ev.dates.filter(inPeriod)[0];
+    var month = evMonthOf(ev);   // 期間内の日が無い予定でも止まらない（v49〜）
     S.ansBusy = true;
     S.ansMsg = { kind: 'busy', text: '保存中…' };
     renderUpcoming();
-    api('answer', { month: month.slice(0, 7), eventKey: key, athleteIds: ids, days: days }).then(function (r) {
-      S.upcoming = { status: 'ok', data: r };
+    api('answer', { month: month, eventKey: key, athleteIds: ids, days: days }).then(function (r) {
+      setUpcoming(r);
       ids.forEach(function (x) { delete S.ansDraft[key + '|' + x]; });   // 保存した内容から作り直す
       S.ansMsg = { kind: 'ok', text: '✓ ' + ev.title + '：' + ids.map(nameOf).join('・') + 'の回答を保存しました' };
       saveCache();   // 端末に残す分も新しくする（v48〜）
     }, function (e) {
       S.ansMsg = { kind: 'ng', text: '⚠ 保存できませんでした：' + e.message };
+    }).then(null, function (e) {   // 成功のあとの処理が失敗しても「保存中」を残さない（v49〜）
+      S.ansMsg = { kind: 'ng', text: '⚠ 保存の結果を確かめられませんでした：' + ((e && e.message) || '') };
     }).then(function () { S.ansBusy = false; renderUpcoming(); renderTabsBadge(); });
   }
 
@@ -1769,11 +1788,14 @@
     renderEvents();
     var q = fresh && S.me.isAdmin ? { month: month, fresh: true } : { month: month };
     if (S.me.isAdmin && (S.tab === 'events' || S.tab === 'plan')) q.checkImported = true;   // MICスケジュールの新しい予定の受付（v46〜）
+    var t0 = reqTick();
     api('events', q).then(function (r) {
+      if (staleSince('ev:' + month, t0)) return;   // 読み込みのあとに保存した → この応答は古い（v49〜）
       S.events[month] = { status: 'ok', data: r, at: Date.now() };
       if (r.autoOpened && r.autoOpened.length) autoOpenedMsg(r.autoOpened);
       saveCache();
     }, function (e) {
+      if (staleSince('ev:' + month, t0)) return;
       var msg = e.code === 'bad_request' && /不明な操作/.test(e.message) ? 'サーバー側（Apps Script）がまだ古い版です。更新後に「最新にする」を押してください' : e.message;
       S.events[month] = { status: 'error', error: msg, data: cur && cur.data, at: cur && cur.at };
     }).then(function () { if (S.tab === 'events') renderSafe(); else renderEvents(); if (S.tab === 'plan') renderPlan(); if (S.tab === 'cal') renderCalTab(); });
@@ -1835,7 +1857,7 @@
       S.evMsg = { kind: 'busy', text: '受付を始めています…' };
       renderEvents();
       api('setAnswerOpenMany', { month: month, eventKeys: keys, open: true }).then(function (r) {
-        S.events[month] = { status: 'ok', data: r, at: Date.now() };
+        setEvents(month, r);
         saveCache();
         var b2 = r.bulk || { changed: [], skipped: [] };
         S.evMsg = { kind: 'ok', text: '✓ ' + b2.changed.length + '件の参加の受付を始めました' + (b2.skipped.length ? '（' + b2.skipped.length + '件は変えませんでした：' + b2.skipped.map(function (x) { return (x.title || '不明') + '・' + x.reason; }).join('、') + '）' : '') };
@@ -1852,23 +1874,25 @@
     renderEvents();
     var others = [];   // 月をまたぐ予定：ほかの月の分も古くなる（v48〜）
     api(action, Object.assign({ month: month }, payload)).then(function (r) {
-      S.events[month] = { status: 'ok', data: r, at: Date.now() };
+      setEvents(month, r);
       others = otherMonthsOf(payload && payload.eventKey, month, r);
       var next = then && then();
-      if (next) return api(next.action, Object.assign({ month: month }, next.payload)).then(function (r2) { S.events[month] = { status: 'ok', data: r2, at: Date.now() }; });
+      if (next) return api(next.action, Object.assign({ month: month }, next.payload)).then(function (r2) { setEvents(month, r2); });
     }).then(function () {
       saveCache();
       // 保存した予定のプルダウンは、保存後の内容で出し直す
       Object.keys(S.selKeep).forEach(function (k) { if (k.indexOf(':' + payload.eventKey) >= 0) delete S.selKeep[k]; });
       S.evMsg = { kind: 'ok', text: '✓ 保存しました' };
       if (S.cal && S.cal.configured) { S.cal.dirty = true; S.calMsg = null; renderCalBar(); }
-    }, function (e) {
-      S.evMsg = { kind: 'ng', text: '⚠ 保存できませんでした：' + e.message };
+    }).then(null, function (e) {   // 成功のあとの処理が失敗しても、ここを通って後片付けまで行く（v49〜）
+      S.evMsg = { kind: 'ng', text: '⚠ 保存できませんでした：' + ((e && e.message) || '') };
     }).then(function () {
       S.evBusy = false;
-      var keep = S.evMsg;   // 読み直しで「✓ 保存しました」を消さない
-      others.forEach(function (m) { loadEvents(m, true); });   // 予定がかかるほかの月を読み直す（担当・受付などを全部の月でそろえる）
-      S.evMsg = keep;
+      try {
+        var keep = S.evMsg;   // 読み直しで「✓ 保存しました」を消さない
+        others.forEach(function (m) { loadEvents(m, true); });   // 予定がかかるほかの月を読み直す（担当・受付などを全部の月でそろえる）
+        S.evMsg = keep;
+      } catch (e2) { if (window.console) console.error(e2); }
       renderEvents();
     });
   }
@@ -2890,9 +2914,9 @@
     p.busy = true;
     p.msg = { kind: 'busy', text: ids.length + '件を' + (mode === 'import' ? '取り込んでいます…' : '却下しています…') };
     renderPlan();
-    api('planRequestsApply', { month: S.month, opId: q.opId, mode: mode, ids: ids, answerModes: modes }, 120000).then(function (r) {
-      S.events[S.month] = { status: 'ok', data: r, at: Date.now() };
-      Object.keys(S.events).forEach(function (m) { if (m !== S.month) delete S.events[m]; });
+    var reqMonth = S.month;
+    api('planRequestsApply', { month: reqMonth, opId: q.opId, mode: mode, ids: ids, answerModes: modes }, 120000).then(function (r) {
+      planApply(r, reqMonth);
       var res = r.results || [], okN = res.filter(function (x) { return x.ok; }).length;
       q.results = res;
       q.confirm = false;
@@ -2993,9 +3017,9 @@
     p.busy = true;
     p.msg = { kind: 'busy', text: evs.length + '件を確定しています…' };
     renderPlan();
-    api('confirmAppEvents', { month: S.month, opId: c.opId, ids: evs.map(function (ev) { return ev.appId; }), autoOpen: c.autoOpen !== false }, 90000).then(function (r) {
-      S.events[S.month] = { status: 'ok', data: r, at: Date.now() };
-      Object.keys(S.events).forEach(function (m) { if (m !== S.month) delete S.events[m]; });
+    var reqMonth = S.month;
+    api('confirmAppEvents', { month: reqMonth, opId: c.opId, ids: evs.map(function (ev) { return ev.appId; }), autoOpen: c.autoOpen !== false }, 90000).then(function (r) {
+      planApply(r, reqMonth);
       var sv = r.saved || { confirmed: [], skipped: [] };
       p.conf = null;
       p.msg = { kind: sv.skipped && sv.skipped.length ? 'busy' : 'ok', html: '✓ ' + sv.confirmed.length + '件を確定しました' + (sv.opened ? '。' + sv.opened + '件は参加の受付も始めました' : '') +
@@ -3112,8 +3136,9 @@
       if (bk.type !== '不在') S.staff.forEach(function (st) { (a[st.staffId] || []).forEach(function (r) { if (roles.indexOf(r) >= 0) assignments.push({ staffId: st.staffId, role: r }); }); });
       return { date: d, assignments: assignments, people: bk.type === '不在' ? bulkDayPeople(bk, d).slice() : [] };
     });
+    var reqMonth = S.month;
     var body = {
-      month: S.month, opId: bk.opId, days: days, type: bk.type, name: bk.name, venue: bk.venue, allDay: !!bk.allDay,
+      month: reqMonth, opId: bk.opId, days: days, type: bk.type, name: bk.name, venue: bk.venue, allDay: !!bk.allDay,
       startTime: bk.allDay ? '' : bk.startTime, endTime: bk.allDay ? '' : bk.endTime, memo: bk.memo, calDesc: bk.calDesc || '', status: bk.status === '確定' ? '確定' : '下書き',
       autoOpen: bk.autoOpen !== false, color: bk.color || ''
     };
@@ -3121,8 +3146,7 @@
     p.msg = { kind: 'busy', text: dates.length + '件作っています…' };
     renderPlan();
     api('saveAppEventsBulk', body, 90000).then(function (r) {
-      S.events[S.month] = { status: 'ok', data: r, at: Date.now() };
-      Object.keys(S.events).forEach(function (m) { if (m !== S.month) delete S.events[m]; });
+      planApply(r, reqMonth);
       var n = (r.saved && r.saved.count) || dates.length;
       p.bulk = null;
       p.start = dates[0]; p.end = dates[dates.length - 1]; p.pick = 'start';
@@ -3170,6 +3194,9 @@
     if (!edHasDates(ed)) { p.msg = { kind: 'ng', text: '⚠ 開始日と終了日を選んでください' }; renderPlan(); return; }
     if (String(ed.calDesc || '').length > CAL_DESC_MAX) { p.msg = { kind: 'ng', text: '⚠ カレンダーの説明は' + CAL_DESC_MAX + '字までです' }; renderPlan(); return; }
     if (!ed.allDay && (!ed.startTime || !ed.endTime)) { p.msg = { kind: 'ng', text: '⚠ 時刻を入れるか、「終日」にしてください' }; renderPlan(); return; }
+    // まとめて登録と同じ検査（v49〜）。サーバーでも同じ検査をしている
+    if (ed.endDate < ed.startDate) { p.msg = { kind: 'ng', text: '⚠ 終了日は開始日と同じか後にしてください' }; renderPlan(); return; }
+    if (!ed.allDay && ed.startDate === ed.endDate && ed.endTime <= ed.startTime) { p.msg = { kind: 'ng', text: '⚠ 終了の時刻は開始より後にしてください' }; renderPlan(); return; }
     if (status === '中止' && ed.status !== '中止' && !window.confirm('この予定を中止にします。\nカレンダーからは次の反映で消え、家族にも出なくなります。よろしいですか？')) return;
     // 参加の回答がある予定の日時を変えるとき：回答を残すか、答え直してもらうかを選んでから保存（v45〜）
     var chg = ed.id ? planDateChange(ed) : '';
@@ -3204,16 +3231,23 @@
     planOp('saveAppEvent', body, label, status === '確定');
   }
 
+  /** 計画の保存の結果を入れる（v49〜）：結果は「送ったときの月」の予定。保存中に月を変えても、今の月には入れない。
+   *  ほかの月は捨てて読み直す（今の月が別の月なら、renderPlan が読み込む） */
+  function planApply(r, reqMonth) {
+    var m0 = (r && r.month) || reqMonth;
+    setEvents(m0, r);
+    Object.keys(S.events).forEach(function (m) { if (m !== m0) delete S.events[m]; });
+  }
+
   function planOp(action, body, label, linkEvents) {
     var p = S.plan, ed = p.ed;
     var touched = ed ? monthsBetween(ed.startDate, ed.endDate) : [];
     p.busy = true;
     p.msg = { kind: 'busy', text: '保存中…' };
     renderPlan();
-    api(action, Object.assign({ month: S.month }, body)).then(function (r) {
-      S.events[S.month] = { status: 'ok', data: r, at: Date.now() };
-      // ほかの月（期間が月をまたぐ・日付を動かした）は読み直す
-      Object.keys(S.events).forEach(function (m) { if (m !== S.month) delete S.events[m]; });
+    var reqMonth = S.month;
+    api(action, Object.assign({ month: reqMonth }, body)).then(function (r) {
+      planApply(r, reqMonth);   // ほかの月（期間が月をまたぐ・日付を動かした）は読み直す
       if (ed) { p.start = ed.startDate; p.end = ed.endDate; p.pick = 'start'; }
       p.ed = null;
       if (r.saved && r.saved.opened) label += '。参加の受付も始めました';   // v46〜
@@ -4047,7 +4081,7 @@
     S.talkMsg = { kind: 'busy', text: on ? 'ピン止めしています…' : 'ピンを外しています…' };
     renderTalk();
     api('talkPin', { month: month, eventKey: key, on: on }).then(function (r) {
-      S.talkSum = r; S.talkSumErr = null; S.talkOrder = null;
+      S.talkSum = r; S.talkSumErr = null; S.talkOrder = null; markApplied('talksum');
       S.talkMsg = { kind: 'ok', text: on ? 'ピン止めしました（上に出ます）' : 'ピンを外しました' };
       saveCache();
     }, function (e) {
@@ -4085,7 +4119,9 @@
   }
 
   function loadTalkSummary() {
+    var t0 = reqTick();
     api('talkSummary').then(function (r) {
+      if (staleSince('talksum', t0)) return;   // 読み込みのあとにピンを変えた → この応答は古い（v49〜）
       S.talkSum = r; S.talkSumErr = null;
       saveCache();
     }, function (e) {
@@ -4128,8 +4164,10 @@
     var o = S.talkOpen;
     if (!o) return;
     if (!quiet) { S.talkMsg = { kind: 'busy', text: '読み込み中…' }; renderTalk(); }
+    var t0 = reqTick();
     api('talkGet', { month: o.month, eventKey: o.key }).then(function (r) {
       if (S.talkOpen !== o) return;
+      if (staleSince('talk', t0)) return;   // 読み込みのあとに書き込んだ・消した → この応答は古い（v49〜）
       var sig = function (x) { return x ? x.messages.map(function (m) { return m.id + (m.deleted ? 'x' : ''); }).join() : ''; };
       var grew = sig(o.data) !== sig(r);   // 書き込み・削除があったときだけ描き直す（入力中の文字を動かさない）
       o.data = r;
@@ -4219,7 +4257,7 @@
     S.talkMsg = { kind: 'busy', text: action === 'talkPost' ? '送信中…' : '削除中…' };
     renderTalk();
     api(action, Object.assign({ month: o.month, eventKey: o.key }, body)).then(function (r) {
-      o.data = r;
+      o.data = r; markApplied('talk');
       S.talkMsg = { kind: 'ok', text: '✓ ' + okText };
       if (done) done();
     }, function (e) {
@@ -4551,14 +4589,14 @@
     });
     if (!nights.length) { lgMsg('ng', '⚠ 泊まる・泊まらない・未定を選んでください'); return; }
     // スタッフは今見ている月（カードはその月の予定から出している）、家族は予定の最初の日の月
-    var month = S.family ? ev.dates.filter(inPeriod)[0].slice(0, 7) : S.month;
+    var month = S.family ? evMonthOf(ev) : S.month;
     var body = { month: month, eventKey: ev.key, nights: nights };
     if (who !== 'me') body.athleteIds = [who];
     S.lgBusy = true;
     lgMsg('busy', '保存中…');
     api('lodgingAnswer', body).then(function (r) {
-      if (S.family) S.upcoming = { status: 'ok', data: r };
-      else S.events[month] = { status: 'ok', data: r, at: Date.now() };
+      if (S.family) setUpcoming(r);
+      else setEvents(month, r);
       delete S.lgDraft[ev.key + '|' + who];
       saveCache();   // 端末に残す分も新しくする（v48〜）
       lgMsg('ok', '✓ ' + ev.title + '：' + (who === 'me' ? '' : nameOf(who) + 'の') + '宿泊の回答を保存しました');
@@ -4614,7 +4652,7 @@
     S.lgBusy = true;
     lgMsg('busy', '保存中…');
     api('lodgingAnswer', { month: month, eventKey: ev.key, adults: adults }).then(function (r) {
-      S.upcoming = { status: 'ok', data: r };
+      setUpcoming(r);
       delete S.lgDraft[ev.key + '|adults'];
       saveCache();
       lgMsg('ok', '✓ ' + ev.title + '：大人の人数を保存しました');
@@ -5214,7 +5252,7 @@
         loadCalStatus();
       } else if (r.kind === 'answer') {
         // 参加の回答：返ってきた「練習会など」で描き直す。同じ予定・選手の下書きは、保存した内容から作り直す
-        S.upcoming = { status: 'ok', data: r.upcoming };
+        setUpcoming(r.upcoming);
         (r.athleteIds || []).forEach(function (x) { if (S.ansDraft) delete S.ansDraft[r.eventKey + '|' + x]; });
         renderUpcoming();
         renderTabsBadge();
