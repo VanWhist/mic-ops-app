@@ -2035,7 +2035,7 @@
 
   function renderPlan() {
     if (!S.me || !S.me.isAdmin || !S.plan || S.tab !== 'plan') return;
-    planMonths().forEach(function (m) { if (!S.events[m]) loadEvents(m); });
+    planMonths().forEach(function (m) { if (!S.events[m] || S.events[m].status === 'cached') loadEvents(m); });   // 前回の分（端末に残した分）は最新を読み直す（v47〜）
     var p = S.plan;
     var st = byId('plStatus');
     var cur = S.events[S.month];
@@ -2956,7 +2956,7 @@
     if (act === 'back') { if (p.busy) return; p.bulk = null; p.msg = null; renderPlan(); return; }
     if (act === 'cprev' || act === 'cnext') {
       var ms = monthsOf(S.period), i = ms.indexOf(bk.calMonth) + (act === 'cprev' ? -1 : 1);
-      if (i >= 0 && i < ms.length) { bk.calMonth = ms[i]; if (!S.events[bk.calMonth]) loadEvents(bk.calMonth); }
+      if (i >= 0 && i < ms.length) { bk.calMonth = ms[i]; if (!S.events[bk.calMonth] || S.events[bk.calMonth].status === 'cached') loadEvents(bk.calMonth); }
       renderPlan(); return;
     }
     if (act === 'day') {
