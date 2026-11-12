@@ -8,7 +8,7 @@
 <meta name="format-detection" content="telephone=no">
 <title>MIC 予定</title>
 <meta name="apple-mobile-web-app-title" content="MIC 予定">
-<link rel="stylesheet" href="style.css?v=20261112a">
+<link rel="stylesheet" href="style.css?v=20261112b">
 </head>
 <body>
 <header class="top">
@@ -144,7 +144,7 @@
         <button type="button" class="next" aria-label="次の月">›</button>
       </div>
       <p class="pl-legend"><span>ス＝スタッフ・選＝選手（○の人数／人数）</span>
-        <span class="band b-cal">既存カレンダー</span><span class="band b-app">アプリの予定</span><span class="band b-app b-draft">下書き</span></p>
+        <span class="band b-cal gc-0">既存カレンダー</span><span class="band b-app gc-0">アプリの予定（左に線）</span><span class="band b-app gc-0 b-draft">下書き</span><span>帯の色＝予定の色（カレンダータブの凡例）</span></p>
       <div class="cal-head"><span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span></div>
       <div id="plCal" class="cal pl-cal"></div>
       <div id="plDetail"></div>
@@ -172,6 +172,13 @@
       </div>
       <p id="calInfo" class="ev-status" role="status" aria-live="polite"></p>
     </div>
+    <details id="colorCheckBox" class="deacon" hidden>
+      <summary>色の確認（カレンダーに反映する前に）</summary>
+      <p class="hint">終わっていない予定が何色になるかの一覧です。自動の色はグループと理由、手で変えた色は「手で変えた色」と出ます。</p>
+      <div class="cal-bar-row"><button id="ccLoad" type="button" class="secondary">一覧を出す</button></div>
+      <p id="ccMsg" class="ev-status" role="status" aria-live="polite"></p>
+      <div id="ccList"></div>
+    </details>
     <details id="joinImportBox" class="deacon" hidden>
       <summary>カレンダーの参加者を取り込む</summary>
       <p class="hint">「MICスケジュール」の説明欄で「参加」「不参加」の下に書いた選手名を、アプリの参加の回答に入れます。登録済みの選手だけで、家族がアプリで回答済みの選手は上書きしません。「（23日のみ）」はその日だけ参加、「（1日のみ）」「（調整中）」など日が決まらないものは取り込みません。</p>
@@ -359,7 +366,7 @@
   </div>
 </section>
 
-<script src="config.js?v=20261112a"></script>
-<script src="app.js?v=20261112a"></script>
+<script src="config.js?v=20261112b"></script>
+<script src="app.js?v=20261112b"></script>
 </body>
 </html>
