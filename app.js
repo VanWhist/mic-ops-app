@@ -557,7 +557,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261112e';
+  var APP_VERSION = '20261117a';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -1306,12 +1306,33 @@
     var info = byId('calInfo');
     byId('calSyncBtn').disabled = !!S.calBusy || !c.configured;
     byId('calDirty').hidden = !c.dirty || !!S.calBusy;
+    renderCalAuto(c);
     if (S.calMsg) { info.textContent = S.calMsg.text; info.className = 'ev-status ' + S.calMsg.kind; return; }
     info.className = 'ev-status';
     if (c.error) { info.textContent = '⚠ ' + c.error; info.className = 'ev-status ng'; }
     else if (!S.cal) info.textContent = '';
     else if (!c.configured) info.textContent = '反映先のカレンダー「MIC 予定（アプリ）」がまだありません（エディタで setupAppCalendar を実行）';
     else info.textContent = '「' + c.calendarName + '」へ反映。' + (c.syncedAt ? '最終反映：' + stampLabel(c.syncedAt) : 'まだ反映していません');
+  }
+
+  /** 自動反映の状態（v51〜）：15分ごと・最後に自動で反映した時刻。切・未設定・失敗が続いている・動いていないときは、それが分かるように出す */
+  var AUTO_CAL_STALE_MS = 45 * 60000;   // 3回分動いていなければ「動いていません」
+  function renderCalAuto(c) {
+    var el = byId('calAuto');
+    if (!el) return;
+    var a = c && c.configured && c.auto;
+    if (!a) { el.hidden = true; el.textContent = ''; return; }   // 古いサーバー・カレンダーが未設定
+    el.hidden = false;
+    var kind = '', text;
+    var last = a.syncedAt ? '最終の自動反映 ' + stampLabel(a.syncedAt) : 'まだ自動で反映したことはありません';
+    var ranMs = a.runAt ? Date.parse(a.runAt.slice(0, 16).replace(' ', 'T') + ':00+09:00') : 0;
+    if (!a.on) text = '自動反映：切（settings の auto_cal_sync が FALSE）。手で［カレンダーに反映］を押してください';
+    else if (!a.installed) text = '自動反映：まだ入っていません（エディタで installAutoCalSync を実行すると、' + a.minutes + '分ごとに反映します）';
+    else if (a.fails) { kind = ' ng'; text = '⚠ 自動反映が' + a.fails + '回続けて失敗しています（' + (a.error || '理由は不明') + '）。' + last; }
+    else if (ranMs && Date.now() - ranMs > AUTO_CAL_STALE_MS) { kind = ' ng'; text = '⚠ 自動反映が動いていません（最後に動いたのは ' + stampLabel(a.runAt) + '）。' + last; }
+    else text = '自動反映：' + a.minutes + '分ごと／' + last;
+    el.textContent = text;
+    el.className = 'ev-status cal-auto' + kind;
   }
 
   function runCalSync() {
@@ -1327,6 +1348,7 @@
         Object.keys(sum).forEach(function (k) { sum[k] += r.result[k] || 0; });
         (r.autoOpened || []).forEach(function (x) { autoList.push(x); });   // v46〜
         S.cal = Object.assign({}, S.cal, { syncedAt: r.syncedAt || (S.cal && S.cal.syncedAt), dirty: r.dirty });
+        if (r.auto) S.cal.auto = r.auto;   // 自動反映の状態（v51〜）
         // 続きがあるのに1件も進まなかった（全部失敗）ときは、続けない（v50〜。前は止まらなかった）
         var moved = (r.result.created || 0) + (r.result.updated || 0) + (r.result.deleted || 0);
         if (r.more && !moved) { sum.stuck = 1; return; }
