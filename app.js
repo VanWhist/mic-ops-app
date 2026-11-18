@@ -557,7 +557,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261117a';
+  var APP_VERSION = '20261118a';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -1331,6 +1331,10 @@
     else if (a.fails) { kind = ' ng'; text = '⚠ 自動反映が' + a.fails + '回続けて失敗しています（' + (a.error || '理由は不明') + '）。' + last; }
     else if (ranMs && Date.now() - ranMs > AUTO_CAL_STALE_MS) { kind = ' ng'; text = '⚠ 自動反映が動いていません（最後に動いたのは ' + stampLabel(a.runAt) + '）。' + last; }
     else text = '自動反映：' + a.minutes + '分ごと／' + last;
+    // MICスケジュールの確認（v52〜）：動いているときだけ同じ行に足す（古いサーバーには fullMinutes が無い）
+    if (a.on && a.installed && a.fullMinutes) {
+      text += '。MICスケジュールの確認：' + (a.fullMinutes === 60 ? '1時間' : a.fullMinutes + '分') + 'ごと／' + (a.fullAt ? '最終 ' + stampLabel(a.fullAt) : 'まだ確認していません');
+    }
     el.textContent = text;
     el.className = 'ev-status cal-auto' + kind;
   }
