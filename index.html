@@ -8,7 +8,7 @@
 <meta name="format-detection" content="telephone=no">
 <title>MIC 予定</title>
 <meta name="apple-mobile-web-app-title" content="MIC 予定">
-<link rel="stylesheet" href="style.css?v=20261118a">
+<link rel="stylesheet" href="style.css?v=20261122a">
 </head>
 <body>
 <header class="top">
@@ -56,6 +56,8 @@
 
   <!-- 自分の予定 -->
   <section id="tab-mine" class="panel" hidden>
+    <!-- 家族だけ（v54〜）：参加の申し込みの回答待ち。いちばん上に出す -->
+    <div id="famAsk" class="fam-ask" hidden></div>
     <div id="help" class="help" hidden>
       <b>使い方</b>
       <ol>
@@ -81,6 +83,7 @@
       <button type="button" class="pen" data-pen="×" role="radio"><b>×</b>行けない</button>
       <button type="button" class="pen" data-pen="" role="radio" aria-label="消す（未入力に戻す）"><b>消</b>未入力に戻す</button>
     </div>
+    <p id="penNote" class="pen-note" hidden>行けそうな日です（練習会を決める参考）。<b>これだけでは参加の申し込みになりません</b></p>
     <label class="range-toggle"><input type="checkbox" id="rangeMode"> 期間でまとめて塗る</label>
     <div id="rangeSteps" class="range-steps" hidden>
       <span class="step" data-step="1">①開始日をタップ</span>
@@ -367,7 +370,7 @@
   </div>
 </section>
 
-<script src="config.js?v=20261118a"></script>
-<script src="app.js?v=20261118a"></script>
+<script src="config.js?v=20261122a"></script>
+<script src="app.js?v=20261122a"></script>
 </body>
 </html>
