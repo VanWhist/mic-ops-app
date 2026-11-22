@@ -1855,7 +1855,7 @@
       h += '<div class="ev-part">参加（1日以上）：' + a.yes.length + '名' + (a.yes.length ? '（' + a.yes.map(function (x) { return esc(x.name); }).join('・') + '）' : '') + '</div>';
       if (a.open) {
         var ids = asking ? asking : S.myAthletes;
-        h += '<div class="ans"><div class="ans-h">参加の申し込み</div>' + (note || '') + ids.map(function (id) { return answerBlock(ev, id); }).join('') + '</div>';   // 見出し（v54〜）
+        h += '<div class="ans-h">参加の申し込み</div>' + (note || '') + '<div class="ans">' + ids.map(function (id) { return answerBlock(ev, id); }).join('') + '</div>';   // 見出し（v54〜。回答欄の中の並びは変えない）
       }
     }
     if (!asking) h += lodgingHtml(ev);   // 宿泊（v21〜）。「参加しますか？」の欄には出さない（一覧のほうで答える）
