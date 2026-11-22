@@ -557,7 +557,7 @@
   // ---------------------------------------------------------------- 画面の版（v25.1〜）
   // ★ リリースのたびに APP_VERSION と version.json・index.html の ?v= をそろえて上げる。
   //   開いたとき・画面に戻ったとき（5分に1回まで）に version.json を読み、違えば「新しい版の画面があります［再読み込み］」を出す
-  var APP_VERSION = '20261118a';
+  var APP_VERSION = '20261122a';
   var versionCheckedAt = 0;
   function checkVersion() {
     if (DEMO || Date.now() - versionCheckedAt < 300000) return;
@@ -675,7 +675,8 @@
 
   function setupFamilyUI() {
     // タブ：入力・みんなの予定・練習会など（役割・スタッフ管理は出さない。AIは右下のボタン・v18〜）
-    var label = { mine: '予定を入力', all: 'みんなの予定', events: '練習会など' };
+    var label = { mine: '行ける日を入力', all: 'みんなの予定', events: '練習会など' };   // v54〜：「予定を入力」→「行ける日を入力」（○△×は参加の申し込みではない）
+    byId('penNote').hidden = false;   // ペンの近くに「これだけでは参加の申し込みになりません」（v54〜）
     document.querySelectorAll('.tab').forEach(function (b) {
       if (label[b.dataset.tab]) b.textContent = label[b.dataset.tab];
     });
@@ -693,20 +694,22 @@
     setupCalShare();   // カレンダーの共有（v29〜）
     document.querySelector('#tab-events .hint').textContent = 'これからの練習会・合宿・大会です。参加の受付中の予定は、選手ごと・日ごとに参加の仕方を選んで［この内容で保存］を押してください。';
     document.querySelector('#tab-events .month-nav').hidden = true;   // 月ごとではなく、これからの予定をまとめて出す
-    byId('evList').addEventListener('click', function (e) {
+    // 参加の申し込みの欄は「練習会など」（#evList）と「行ける日を入力」の上（#famAsk・v54〜）の2か所。同じ部品・同じ下書き
+    ['evList', 'famAsk'].forEach(function (boxId) {
+    byId(boxId).addEventListener('click', function (e) {
       var b = e.target.closest('[data-ad]');
       if (!b || b.disabled || S.ansBusy) return;
       answerClick(b);
     });
     // 日ごとの備考（v16〜）：打つたびに下書きへ。描き直さず（入力中の文字を消さないように）「まだ保存していません」だけ出し入れする
-    byId('evList').addEventListener('input', function (e) {
+    byId(boxId).addEventListener('input', function (e) {
       var t = e.target;
       if (!t.dataset || !t.dataset.adn) return;
       var dr = draftOf(t.dataset.key, t.dataset.id);
       var v = dr[t.dataset.date] || (dr[t.dataset.date] = {});
       v.n = t.value;
       var ev = upcomingEvent(t.dataset.key);
-      document.querySelectorAll('#evList .ans-ath[data-key="' + t.dataset.key + '"][data-id="' + t.dataset.id + '"]').forEach(function (blk) {
+      document.querySelectorAll('#evList .ans-ath[data-key="' + t.dataset.key + '"][data-id="' + t.dataset.id + '"], #famAsk .ans-ath[data-key="' + t.dataset.key + '"][data-id="' + t.dataset.id + '"]').forEach(function (blk) {
         var dirty = ev && draftDirty(ev, t.dataset.id);
         blk.classList.toggle('dirty', !!dirty);
         blk.querySelector('.ans-unsaved').hidden = !dirty;
@@ -714,13 +717,14 @@
         blk.querySelectorAll('[data-adn][data-date="' + t.dataset.date + '"]').forEach(function (x) { if (x !== t) x.value = t.value; });
       });
     });
-    byId('evList').addEventListener('change', function (e) {
+    byId(boxId).addEventListener('change', function (e) {
       var t = e.target;
       if (!t.dataset || !t.dataset.adt) return;
       var dr = draftOf(t.dataset.key, t.dataset.id);
       var v = dr[t.dataset.date] || (dr[t.dataset.date] = { k: '時間' });
       v[t.dataset.adt] = t.value;
       renderUpcoming();
+    });
     });
     document.querySelector('#tab-all .hint').textContent = '全選手の○△×です（見るだけ）。日付をタップすると、その日の○・△の人を表示します。';
   }
@@ -754,7 +758,7 @@
       if (b.dataset.tab === 'staff' || b.dataset.tab === 'plan') b.hidden = !S.me.isAdmin;
       if (b.dataset.tab === 'roles' && S.family) b.hidden = true;
       b.addEventListener('click', function () {
-        if (S.family && S.tab === 'events' && b.dataset.tab !== 'events' && hasUnsavedAnswers() && !window.confirm(UNSAVED_MSG)) return;
+        if (S.family && (S.tab === 'events' || S.tab === 'mine') && b.dataset.tab !== S.tab && hasUnsavedAnswers() && !window.confirm(UNSAVED_MSG)) return;   // v54〜：「行ける日を入力」の上の欄でも
         S.tab = b.dataset.tab;
         S.calBack = null;   // タブを選び直したら「カレンダーに戻る」は消す（v33〜）
         renderAll();
@@ -935,6 +939,8 @@
     if (S.me.isAdmin) return;
     renderMonthLabels();
     renderAthTabs();
+    // 参加の申し込みの回答待ち（v54〜）：○を付けた直後に、その日の受付中の予定を出す。欄の中で入力中なら描き直さない（v34・v50 と同じ考え）
+    if (S.family) renderFamAsk();   // 欄の中で入力中なら renderFamAsk が描き直さない
     if (S.family && !S.curAthlete) {
       byId('cal').innerHTML = '';
       byId('mineSummary').textContent = '選手がまだ登録されていません。管理者に連絡してください。';
@@ -1571,7 +1577,7 @@
     }).then(function () {
       // 備考を打っている途中なら描き直さない（前回の分を出している間に打ち始めても、文字が消えないように。v34〜）。入力欄を離れたら描く
       var el = document.activeElement;
-      if (el && /^(INPUT|TEXTAREA)$/.test(el.tagName) && byId('evList').contains(el)) S.deferRender = true;
+      if (el && /^(INPUT|TEXTAREA)$/.test(el.tagName) && (byId('evList').contains(el) || byId('famAsk').contains(el))) S.deferRender = true;
       else renderUpcoming();
       renderTabsBadge();
     });
@@ -1592,10 +1598,70 @@
     return out;
   }
 
+  /**
+   * 回答待ち（v54〜）：受付中で、自分の家族の選手がまだ答えていない（日時が変わって要確認も）予定。選手ごとに数える。
+   * 並び：○（行ける）の日を含む予定（askList と同じもの）が先、そのほかがあと。それぞれ開始日の近い順（参加の受付には締切が無いので開始日）
+   * 戻り値 { ask:[{ev, ids, ok}], other:[{ev, ids}], count }。ids はまだ答えていない選手、ok はそのうち○の日がある選手
+   */
+  function waitList(events) {
+    var ask = [], other = [], count = 0;
+    var byStart = function (a, b) { return a.ev.dates[0] < b.ev.dates[0] ? -1 : a.ev.dates[0] > b.ev.dates[0] ? 1 : 0; };
+    events.forEach(function (ev) {
+      if (!ev.answers || !ev.answers.open) return;
+      var un = S.myAthletes.filter(function (id) { var m = ev.answers.mine[id]; return !(m && m.a); });
+      if (!un.length) return;
+      count += un.length;
+      var ok = un.filter(function (id) { return ev.dates.some(function (d) { return valueOf(id, d).s === '○'; }); });
+      var rest = un.filter(function (id) { return ok.indexOf(id) < 0; });
+      // ○の選手が1人でもいる予定は「参加しますか？」に。答えていない選手を全員出す（［兄弟にも同じ回答］が使えるように）
+      if (ok.length) ask.push({ ev: ev, ids: un, ok: ok }); else other.push({ ev: ev, ids: un });
+    });
+    ask.sort(byStart); other.sort(byStart);
+    return { ask: ask, other: other, count: count };
+  }
+
+  /** 家族の「行ける日を入力」タブのいちばん上（v54〜）：参加の申し込みの回答待ち。中身の部品は「練習会など」と同じ（下書きも同じ） */
+  function renderFamAsk() {
+    var box = byId('famAsk');
+    if (!box) return;
+    // 欄の中で文字を入力中（備考・時間）は描き直さない。欄を離れたら描く（v34・v50 と同じ考え。focusout → renderSafe）
+    var fa = document.activeElement;
+    if (fa && box.contains(fa) && /^(INPUT|TEXTAREA|SELECT)$/.test(fa.tagName)) { S.deferRender = true; return; }
+    var d = S.family && S.upcoming && S.upcoming.data;
+    if (!d) { box.hidden = true; box.innerHTML = ''; return; }
+    var w = waitList(d.events);
+    var anyOpen = d.events.some(function (ev) { return ev.answers && ev.answers.open; });
+    if (!w.count) {
+      box.hidden = !anyOpen;   // 受付中の予定が無いときは何も出さない
+      box.className = 'fam-ask done';
+      box.innerHTML = anyOpen ? '<p>✓ 受付中の予定にはすべて回答済みです</p>' : '';
+      return;
+    }
+    box.hidden = false;
+    box.className = 'fam-ask';
+    var who = function (ids) { return S.myAthletes.length > 1 && ids.length < S.myAthletes.length ? '<p class="ask-who">' + ids.map(function (id) { return esc(nameOf(id)); }).join('・') + 'がまだです</p>' : ''; };
+    var msg = S.ansMsg && S.ansMsg.kind !== 'busy' ? '<p class="ev-status ' + S.ansMsg.kind + '" role="status">' + esc(S.ansMsg.text) + '</p>' : (S.ansBusy ? '<p class="ev-status busy" role="status">保存中…</p>' : '');
+    var h = '<h3>参加の申し込み：回答待ち ' + w.count + '件</h3>' + msg;
+    if (w.ask.length) {
+      h += '<h4>参加しますか？</h4><p class="hint">○（行ける）を付けた日に練習会などが決まりました。参加するかを答えてください。</p>' +
+        w.ask.map(function (x) { return familyCard(x.ev, x.ids, who(x.ids)); }).join('');
+    }
+    if (w.other.length) {
+      // ○を付けていない日の予定は畳んでおく（カレンダーが下に押し出されないように）。開いた・閉じたは覚えておく
+      var n = w.other.reduce(function (t, x) { return t + x.ids.length; }, 0);
+      h += '<details class="fam-other"' + (S.famOtherOpen ? ' open' : '') + '><summary>' + (w.ask.length ? 'そのほかの受付中の予定' : '受付中の予定') + '（' + n + '件）</summary>' +
+        '<p class="hint">○を付けていない日の予定です。参加するときも、しないときも答えてください。</p>' +
+        w.other.map(function (x) { return familyCard(x.ev, x.ids, who(x.ids)); }).join('') + '</details>';
+    }
+    box.innerHTML = h;
+    var det = box.querySelector('details.fam-other');
+    if (det) det.addEventListener('toggle', function () { S.famOtherOpen = det.open; });
+  }
+
   function renderTabsBadge() {
     if (!S.family) return;
     var d = S.upcoming && S.upcoming.data;
-    var n = d ? askList(d.events).length : 0;
+    var n = d ? waitList(d.events).count : 0;   // v54〜：回答待ち（選手ごと・○を付けていない予定も）の数
     var b = document.querySelector('.tab[data-tab="events"]');
     if (b) b.textContent = '練習会など' + (n ? '（' + n + '）' : '');
     tabsEdges();
@@ -1779,7 +1845,7 @@
     return h;
   }
 
-  function familyCard(ev, asking) {
+  function familyCard(ev, asking, note) {
     var a = ev.answers;
     var h = '<article class="ev' + (asking ? ' ask' : '') + '"' + (asking ? '' : ' data-key="' + esc(ev.key) + '"') + '><div class="ev-date">' + evDateLabel(ev) + '</div>' +
       '<h3 class="ev-title">' + esc(ev.title) + '</h3>' + (ev.location ? '<div class="ev-loc">' + esc(ev.location) + '</div>' : '') +
@@ -1789,7 +1855,7 @@
       h += '<div class="ev-part">参加（1日以上）：' + a.yes.length + '名' + (a.yes.length ? '（' + a.yes.map(function (x) { return esc(x.name); }).join('・') + '）' : '') + '</div>';
       if (a.open) {
         var ids = asking ? asking : S.myAthletes;
-        h += '<div class="ans">' + ids.map(function (id) { return answerBlock(ev, id); }).join('') + '</div>';
+        h += '<div class="ans-h">参加の申し込み</div>' + (note || '') + '<div class="ans">' + ids.map(function (id) { return answerBlock(ev, id); }).join('') + '</div>';   // 見出し（v54〜。回答欄の中の並びは変えない）
       }
     }
     if (!asking) h += lodgingHtml(ev);   // 宿泊（v21〜）。「参加しますか？」の欄には出さない（一覧のほうで答える）
@@ -1806,7 +1872,7 @@
     else { status.textContent = ''; status.className = 'ev-status'; }
     byId('evOrphans').innerHTML = '';
     var d = st && st.data;
-    if (!d) { byId('evList').innerHTML = ''; return; }
+    if (!d) { byId('evList').innerHTML = ''; renderFamAsk(); return; }
     var ask = askList(d.events);
     var h = '';
     if (ask.length) {
@@ -1816,6 +1882,7 @@
     h += '<h3 class="up-h">これからの練習会・合宿・大会</h3>';
     h += d.events.length ? d.events.map(function (ev) { return familyCard(ev, null); }).join('') : '<p class="muted">これからの練習会・合宿・大会はありません。</p>';
     byId('evList').innerHTML = h;
+    renderFamAsk();   // 「行ける日を入力」の上の欄も同じ内容で（v54〜）
   }
 
   function loadEvents(month, force, fresh) {
